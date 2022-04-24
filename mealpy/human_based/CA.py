@@ -1,72 +1,110 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu" at 12:09, 02/03/2021                                                               %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Nguyen_Thieu2                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-# ------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 12:09, 02/03/2021 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import uniform, choice
-from numpy import array, min, max
-from mealpy.optimizer import Root
+import numpy as np
+from mealpy.optimizer import Optimizer
 
 
-class OriginalCA(Root):
+class OriginalCA(Optimizer):
     """
     The original version of: Culture Algorithm (CA)
-        Based on Ruby version in the book: Clever Algorithm (Jason Brown)
+
+    Links:
+        1. https://github.com/clever-algorithms/CleverAlgorithms
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + accepted_rate (float): [0.1, 0.5], probability of accepted rate, default: 0.15
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.human_based.CA import OriginalCA
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> accepted_rate = 0.15
+    >>> model = OriginalCA(problem_dict1, epoch, pop_size, accepted_rate)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Chen, B., Zhao, L. and Lu, J.H., 2009, April. Wind power forecast using RBF network and culture algorithm.
+    In 2009 International Conference on Sustainable Power Generation and Supply (pp. 1-6). IEEE.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, accepted_rate=0.2, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.accepted_rate = accepted_rate      # probability of accepted rate
+    def __init__(self, problem, epoch=10000, pop_size=100, accepted_rate=0.15, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            accepted_rate (float): probability of accepted rate, default: 0.15
+        """
+        super().__init__(problem, kwargs)
 
-    def binary_tournament(self, population):
-        id1, id2 = choice(list(range(0, len(population))), 2, replace=False)
-        return population[id1] if (population[id1][self.ID_FIT] < population[id2][self.ID_FIT]) else population[id2]
-
-    def create_faithful(self, lb, ub):
-        position = uniform(lb, ub)
-        fitness = self.get_fitness_position(position=position)
-        return [position, fitness]
-
-    def update_belief_space(self, belief_space, pop_accepted):
-        pos_list = array([solution[self.ID_POS] for solution in pop_accepted])
-        belief_space["lb"] = min(pos_list, axis=0)
-        belief_space["ub"] = max(pos_list, axis=0)
-        return belief_space
-
-    def train(self):
-        pop = [self.create_solution() for _ in range(0, self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-        belief_space = {
-            "lb": self.lb,
-            "ub": self.ub,
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.accepted_rate = self.validator.check_float("accepted_rate", accepted_rate, (0, 1.0))
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = True
+        ## Dynamic variables
+        self.dyn_belief_space = {
+            "lb": self.problem.lb,
+            "ub": self.problem.ub,
         }
-        accepted_num = int(self.accepted_rate * self.pop_size)
+        self.dyn_accepted_num = int(self.accepted_rate * self.pop_size)
         # update situational knowledge (g_best here is a element inside belief space)
 
-        for epoch in range(self.epoch):
+    def create_faithful(self, lb, ub):
+        position = self.generate_position(lb, ub)
+        position = self.amend_position(position, lb, ub)
+        target = self.get_target_wrapper(position)
+        return [position, target]
 
-            # create next generation
-            pop_child = [self.create_faithful(belief_space["lb"], belief_space["ub"]) for _ in range(0, self.pop_size)]
+    def update_belief_space(self, belief_space, pop_accepted):
+        pos_list = np.array([solution[self.ID_POS] for solution in pop_accepted])
+        belief_space["lb"] = np.min(pos_list, axis=0)
+        belief_space["ub"] = np.max(pos_list, axis=0)
+        return belief_space
 
-            # select next generation
-            pop = [self.binary_tournament(pop + pop_child) for _ in range(0, self.pop_size)]
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            pop, g_best = self.update_sorted_population_and_global_best_solution(pop, self.ID_MIN_PROB, g_best)
+        Args:
+            epoch (int): The current iteration
+        """
+        # create next generation
+        pop_child = [self.create_faithful(self.dyn_belief_space["lb"], self.dyn_belief_space["ub"]) for _ in range(0, self.pop_size)]
 
-            # Get accepted faithful
-            accepted = pop[:accepted_num]
+        # select next generation
+        pop_new = []
+        pop_full = self.pop + pop_child
+        size_new = len(pop_full)
+        for _ in range(0, self.pop_size):
+            id1, id2 = np.random.choice(list(range(0, size_new)), 2, replace=False)
+            if self.compare_agent(pop_full[id1], pop_full[id2]):
+                pop_new.append(pop_full[id1])
+            else:
+                pop_new.append(pop_full[id2])
+        self.pop = self.get_sorted_strim_population(pop_new)
 
-            # Update belief_space
-            belief_space = self.update_belief_space(belief_space, accepted)
+        # Get accepted faithful
+        accepted = self.pop[:self.dyn_accepted_num]
 
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print(">Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        # Update belief_space
+        self.dyn_belief_space = self.update_belief_space(self.dyn_belief_space, accepted)

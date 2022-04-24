@@ -1,3 +1,151 @@
+# Version 2.4.0
+
+### Update
+
++ Add mealpy's support functions in terminal: help(mealpy), dir(mealpy)
++ Add logger module (Logger class)
++ Add validator module (Validator class)
++ Change in Optimizer class:
+  + remove function get_global_best_global_worst_solution()
+  + replace save_optimization_process() by track_optimize_step() and track_optimize_process()
+  + update input of Problem and Termination object in Optimizer.
+  + add logger
+  + add validator and update all algorithms
+  + update function: get_special_solutions()
+  + rename function: crossover_arthmetic_recombination() to crossover_arithmetic()
+  + rename function: get_fitness_position() to get_target_wrapper()
+  + rename function: update_fitness_population() to update_target_wrapper_population()
+
++ A default method: generate_position() in Problem class.
++ Due to nature's characteristics of different problems, 2 methods can be designed for Optimizer to fit the problem 
+  are generate_position() and amend_position(). Both methods are moved from Optimizer 
+  class to Problem class, the create_solution() in Optimizer class will call these methods to create a new solution.
++ Update History and Problem class
+  + design default amend_position function in Problem class 
+  + parameter: obj_weight changed to obj_weights
+  + add parameter: save_population to control 
++ Add Pareto-like Sequential Sampling (PSS) to math_based group
+
+
+---------------------------------------------------------------------
+
+# Version 2.3.0
+
+### Update
+
++ All algorithms have been updated with the amend_position function for solving the discrete problem.
++ Required packages are version reduction to fit python 3.6
++ Add examples of how to design and custom a new algorithm based on this framework
++ Add examples mealpy solve discrete problems (combinatorial, permutation)
+
+
+---------------------------------------------------------------------
+
+# Version 2.2.0
+
+### Update models
+
+* You can pass the Problem dictionary or Problem object to the model.
+* You can pass the Termination dictionary or Termination object to the model.
+* The objective function is renamed as fitness function (obj_func -> fit_func)
+* The general format of a solution is: **\[position, target\]**
+    * position: numpy vector (1-D array)
+    * target: **\[fitness, list_objectives\]**
+    * list_objectives: **\[objective 1, objective 2, ...\]**
+    * After the training process, everything can be accessed via the objective "history" (model.history)
+
+* You can name your model and name your fitness function when creating a model 
+  * model(problem, epoch, pop_size, ...., name='your model name', fit_name='your fitness function name')
+* Add new algorithms: 
+  * Gradient-Based Optimizer (GBO) in math_based group
+  * Chaos Game Optimization (CGO) in math_based group
+* Remove all dummy algorithms (Not supported anymore)
+* Fix bugs:
+  * Find idx of min-distance in BRO algorithm
+  * Update more strategy for GA algorithm
+  * Update child selection process in MA algorithm
+
+### Update others
+
++ examples: Update several scenarios for mealpy with other frameworks
++ document: Add document website (https://mealpy.readthedocs.io/)
+
+---------------------------------------------------------------------
+
+# Version 2.1.2
+
+### Update
+
++ Some algorithms have been updated in the GitHub release but not on PyPI such as Sparrow Search Algorithm.
++ I try to synchronize the version on GitHub and PyPI by trying to delete the vers
++ Add examples for applications of mealpy such as:
+  + Tuning hyper-parameter of neural network
+  + Replacing Gradient Descent optimizer in neural network
+  + Tuning hyper-parameter for other models such as SVM,...
+
+---------------------------------------------------------------------
+
+# Version 2.1.1
+
+### Update
+
++ Replace all .copy() operator by deepcopy() operator in module copy. Because shallow copy causing the problem with 
+  nested list inside list. Especially when copying population with nested of list position inside agent.
++ Add the Knapsack Problem example: examples/applications/discrete-problems/knapsack-problem.py
++ Add the Linear Regression example with Pytorch: examples/applications/pytorch/linear_regression.py
++ Add tutorial videos "How to use Mealpy library" to README.md
+
+---------------------------------------------------------------------
+
+# Version 2.1.0
+
+### Change models
+
++ Move all parallel function to Optimizer class
++ Remove unused methods in Optimizer class
++ Update all algorithm models with the same code-style as previous version
++ Restructure some hard algorithms include BFO, CRO.
+
+### Change others
+
++ examples: Update examples for all new algorithms
++ history: Update history of MHAs
++ parallel: Add comment on parallel and sequential mode
++ Add code-of-conduct
++ Add the complete example: examples/example_full_v210.py
+
+---------------------------------------------------------------------
+
+# Version 2.0.0
+
+### Change models
++ Update entire the library based on Optimizer class:
+    + Add class Problem and class Termination
+    + Add 3 training modes (sequential, thread and process)
+    + Add visualization charts:
+        + Global fitness value after generations
+        + Local fitness value after generations
+        + Global Objectives chart (For multi-objective functions)
+        + Local Objective chart (For multi-objective functions)
+        + The Diversity of population chart
+        + The Exploration verse Exploitation chart
+        + The Running time chart for each iteration (epoch / generation)
+        + The Trajectory of some agents after generations 
++ My batch-size idea is removed due to the parallel training mode
++ User can define the Stopping Condition based on:
+    + Epoch (Generation / Iteration) - default
+    + Function Evaluation 
+    + Early Stopping
+    + Time-bound (The running time for a single algorithm for a single task)
+
+
+### Change others
+
++ examples: Update examples for all new algorithms
++ history: Update history of MHAs
+
+---------------------------------------------------------------------
+
 # Version 1.2.2
 
 ### Change models

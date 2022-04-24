@@ -1,118 +1,106 @@
 #!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 12:17, 18/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# Created by "Thieu" at 12:17, 18/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import uniform
-from numpy import ceil
-from copy import deepcopy
-from mealpy.optimizer import Root
+import numpy as np
+from mealpy.optimizer import Optimizer
 
 
-class BaseIWO(Root):
+class OriginalIWO(Optimizer):
     """
-    My version of: weed colonization (IWO)
-        A novel numerical optimization algorithm inspired from weed colonization
-    Noted:
-        https://pdfs.semanticscholar.org/734c/66e3757620d3d4016410057ee92f72a9853d.pdf
-    """
+    The original version of: Invasive Weed Optimization (IWO)
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 seeds=(2, 10), exponent=2, sigma=(0.5, 0.001), **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.seeds = seeds          # (Min, Max) Number of Seeds
-        self.exponent = exponent    # Variance Reduction Exponent
-        self.sigma = sigma          # (Initial, Final) Value of Standard Deviation
+    Links:
+        1. https://pdfs.semanticscholar.org/734c/66e3757620d3d4016410057ee92f72a9853d.pdf
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        pop, g_best = self.get_sorted_pop_and_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-        fit_best = g_best[self.ID_FIT]
-        fit_worst = pop[self.ID_MAX_PROB][self.ID_FIT]
-        for epoch in range(self.epoch):
-            # Update Standard Deviation
-            sigma = ((self.epoch - epoch) / (self.epoch - 1)) ** self.exponent * (self.sigma[0] - self.sigma[1]) + self.sigma[1]
-            # Reproduction
-            pop_new = []
-            for item in pop:
-                ratio = (item[self.ID_FIT] - fit_worst) / (fit_best - fit_worst + self.EPSILON)
-                s = int(ceil(self.seeds[0] + (self.seeds[1] - self.seeds[0]) * ratio))
-                for j in range(s):
-                    # Initialize Offspring and Generate Random Location
-                    pos_new = item[self.ID_POS] + sigma * uniform(self.lb, self.ub)
-                    pos_new = self.amend_position_faster(pos_new)
-                    fit = self.get_fitness_position(pos_new)
-                    pop_new.append([pos_new, fit])
+    Notes
+    ~~~~~
+    Better to use normal distribution instead of uniform distribution, updating population by sorting
+    both parent population and child population
 
-            # Re-calculate best train and worst train
-            pop = pop + pop_new
-            pop, g_best = self.update_sorted_population_and_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            pop = pop[:self.pop_size]
-            fit_worst = pop[self.ID_MAX_PROB][self.ID_FIT]
-            fit_best = pop[self.ID_MIN_PROB][self.ID_FIT]
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + seeds (list, tuple): (min_value, max_value) -> ([1, 3], [4, 10]), Number of Seeds
+        + exponent (int): [2, 4], Variance Reduction Exponent
+        + sigmas (list, tuple): (initial_value, final_value), ((0.3, 1.0), (0, 0.2)), Value of Standard Deviation
 
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.bio_based.IWO import OriginalIWO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> seeds = (3, 9)
+    >>> exponent = 3
+    >>> sigmas = (0.6, 0.01)
+    >>> model = OriginalIWO(problem_dict1, epoch, pop_size, seeds, exponent, sigmas)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
-
-class OriginalIWO(Root):
-    """
-    Original version of: weed colonization (IWO)
-        A novel numerical optimization algorithm inspired from weed colonization
-    Link:
-        https://pdfs.semanticscholar.org/734c/66e3757620d3d4016410057ee92f72a9853d.pdf
+    References
+    ~~~~~~~~~~
+    [1] Mehrabian, A.R. and Lucas, C., 2006. A novel numerical optimization algorithm inspired from weed colonization.
+    Ecological informatics, 1(4), pp.355-366.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 seeds=(2, 10), exponent=2, sigma=(0.5, 0.001), **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.seeds = seeds              # (Min, Max) Number of Seeds
-        self.exponent = exponent        # Variance Reduction Exponent
-        self.sigma = sigma              # (Initial, Final) Value of Standard Deviation
+    def __init__(self, problem, epoch=10000, pop_size=100, seeds=(2, 10), exponent=2, sigmas=(0.5, 0.001), **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            seeds (tuple, list): (Min, Max) Number of Seeds
+            exponent (int): Variance Reduction Exponent
+            sigmas (tuple, list): (Initial, Final) Value of Standard Deviation
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.seeds = self.validator.check_tuple_int("seeds (min, max)", seeds, ([1, 3], [4, int(self.pop_size / 2)]))
+        self.exponent = self.validator.check_int("exponent", exponent, [2, 4])
+        self.sigmas = self.validator.check_tuple_float("sigmas (initial, final)", sigmas, ((0.5, 3.0), (0, 0.5)))
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        pop_sorted, g_best = self.get_sorted_pop_and_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-        cost_best = g_best[self.ID_FIT]
-        cost_worst = pop_sorted[self.ID_MAX_PROB][self.ID_FIT]
-        for epoch in range(self.epoch):
-            # Update Standard Deviation
-            sigma = ((self.epoch - epoch) / (self.epoch - 1)) ** self.exponent * (self.sigma[0] - self.sigma[1]) + self.sigma[1]
-            # Reproduction
-            pop_new = []
-            for item in pop:
-                ratio = (item[self.ID_FIT] - cost_worst) / (cost_best - cost_worst)
-                S = int(ceil(self.seeds[0] + (self.seeds[1] - self.seeds[0]) * ratio))
-                for j in range(S):
-                    # Initialize Offspring and Generate Random Location
-                    pos_new = item[self.ID_POS] + sigma * uniform(self.lb, self.ub)
-                    pos_new = self.amend_position_faster(pos_new)
-                    fit = self.get_fitness_position(pos_new)
-                    pop_new.append([pos_new, fit])
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = True
 
-            # Merge Populations
-            pop = pop + pop_new
-            pop = sorted(pop, key=lambda temp: temp[self.ID_FIT])
-            pop = pop[:self.pop_size]
+    def evolve(self, epoch=None):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            # Re-calculate best train and worst train
-            cost_worst = pop[self.ID_MAX_PROB][self.ID_FIT]
-            if cost_best > pop[self.ID_MIN_PROB][self.ID_FIT]:
-                g_best = deepcopy(pop[self.ID_MIN_PROB])
-                cost_best = g_best[self.ID_FIT]
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        Args:
+            epoch (int): The current iteration
+        """
+        # Update Standard Deviation
+        sigma = ((self.epoch - epoch) / (self.epoch - 1)) ** self.exponent * (self.sigmas[0] - self.sigmas[1]) + self.sigmas[1]
+        pop, best, worst = self.get_special_solutions(self.pop)
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            temp = best[0][self.ID_TAR][self.ID_FIT] - worst[0][self.ID_TAR][self.ID_FIT]
+            if temp == 0:
+                ratio = 0.5
+            else:
+                ratio = (pop[idx][self.ID_TAR][self.ID_FIT] - worst[0][self.ID_TAR][self.ID_FIT]) / temp
+            s = int(np.ceil(self.seeds[0] + (self.seeds[1] - self.seeds[0]) * ratio))
+            if s > int(np.sqrt(self.pop_size)):
+                s = int(np.sqrt(self.pop_size))
+            pop_local = []
+            for j in range(s):
+                # Initialize Offspring and Generate Random Location
+                pos_new = pop[idx][self.ID_POS] + sigma * np.random.normal(self.problem.lb, self.problem.ub)
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                pop_local.append([pos_new, None])
+            pop_local = self.update_target_wrapper_population(pop_local)
+            pop_new += pop_local
+        self.pop = self.get_sorted_strim_population(pop_new, self.pop_size)

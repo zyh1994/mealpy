@@ -1,161 +1,264 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 14:51, 17/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 14:51, 17/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import uniform, choice
-from numpy import abs
+import numpy as np
 from copy import deepcopy
-from mealpy.optimizer import Root
+from mealpy.optimizer import Optimizer
 
 
-class BaseSFO(Root):
+class BaseSFO(Optimizer):
     """
     The original version of: SailFish Optimizer (SFO)
-    Link:
-        https://doi.org/10.1016/j.engappai.2019.01.001
+
+    Links:
+        1. https://doi.org/10.1016/j.engappai.2019.01.001
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + pp (float): the rate between SailFish and Sardines (N_sf = N_s * pp) = 0.25, 0.2, 0.1
+        + AP (float): coefficient for decreasing the value of Attack Power linearly from AP to 0
+        + epxilon (float): should be 0.0001, 0.001
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.SFO import BaseSFO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> pp = 0.1
+    >>> AP = 4
+    >>> epxilon = 0.0001
+    >>> model = BaseSFO(problem_dict1, epoch, pop_size, pp, AP, epxilon)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Shadravan, S., Naji, H.R. and Bardsiri, V.K., 2019. The Sailfish Optimizer: A novel
+    nature-inspired metaheuristic algorithm for solving constrained engineering optimization
+    problems. Engineering Applications of Artificial Intelligence, 80, pp.20-34.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 pp=0.1, A=4, epxilon=0.0001, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size        # SailFish pop size
-        self.pp = pp                    # the rate between SailFish and Sardines (N_sf = N_s * pp) = 0.25, 0.2, 0.1
-        self.A = A                      # A = 4, 6,... (coefficient for decreasing the value of Power Attack linearly from A to 0)
-        self.epxilon = epxilon          # = 0.0001, 0.001
+    def __init__(self, problem, epoch=10000, pop_size=100, pp=0.1, AP=4, epxilon=0.0001, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100, SailFish pop size
+            pp (float): the rate between SailFish and Sardines (N_sf = N_s * pp) = 0.25, 0.2, 0.1
+            AP (float): coefficient for decreasing the value of Power Attack linearly from AP to 0
+            epxilon (float): should be 0.0001, 0.001
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.pp = self.validator.check_float("pp", pp, (0, 1.0))
+        self.AP = self.validator.check_float("AP", AP, (0, 100))
+        self.epxilon = self.validator.check_float("epxilon", epxilon, (0, 0.1))
 
-    def train(self):
-        s_size = int(self.pop_size / self.pp)
-        sf_pop = [self.create_solution() for _ in range(0, self.pop_size)]
-        s_pop = [self.create_solution() for _ in range(0, s_size)]
-        sf_gbest = self.get_global_best_solution(sf_pop, self.ID_FIT, self.ID_MIN_PROB)
-        s_gbest = self.get_global_best_solution(s_pop, self.ID_FIT, self.ID_MIN_PROB)
+        self.nfe_per_epoch = 2 * self.pop_size
+        self.sort_flag = True
+        self.s_size = int(self.pop_size / self.pp)
 
-        for epoch in range(0, self.epoch):
+    def initialization(self):
+        self.pop = self.create_population(self.pop_size)
+        self.s_pop = self.create_population(self.s_size)
+        _, self.g_best = self.get_global_best_solution(self.pop)  # pop = sailfish
+        _, self.s_gbest = self.get_global_best_solution(self.s_pop)  # s_pop = sardines
 
-            ## Calculate lamda_i using Eq.(7)
-            ## Update the position of sailfish using Eq.(6)
-            for i in range(0, self.pop_size):
-                PD = 1 - len(sf_pop) / ( len(sf_pop) + len(s_pop) )
-                lamda_i = 2 * uniform() * PD - PD
-                sf_pop[i][self.ID_POS] = s_gbest[self.ID_POS] - lamda_i * ( uniform() *
-                                        ( sf_gbest[self.ID_POS] + s_gbest[self.ID_POS] ) / 2 - sf_pop[i][self.ID_POS] )
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            ## Calculate AttackPower using Eq.(10)
-            AP = self.A * ( 1 - 2 * (epoch + 1) * self.epxilon )
-            if AP < 0.5:
-                alpha = int(len(s_pop) * abs(AP) )
-                beta = int(self.problem_size * abs(AP))
-                ### Random choice number of sardines which will be updated their position
-                list1 = choice(range(0, len(s_pop)), alpha)
-                for i in range(0, len(s_pop)):
-                    if i in list1:
-                        #### Random choice number of dimensions in sardines updated, remove third loop by numpy vector computation
-                        list2 = choice(range(0, self.problem_size), beta, replace=False)
-                        s_pop[i][self.ID_POS][list2] = (uniform(0, 1, self.problem_size) * (sf_gbest[self.ID_POS] - s_pop[i][self.ID_POS] + AP))[list2]
-            else:
-                ### Update the position of all sardine using Eq.(9)
-                for i in range(0, len(s_pop)):
-                    s_pop[i][self.ID_POS] = uniform()*( sf_gbest[self.ID_POS] - s_pop[i][self.ID_POS] + AP )
+        Args:
+            epoch (int): The current iteration
+        """
+        ## Calculate lamda_i using Eq.(7)
+        ## Update the position of sailfish using Eq.(6)
+        nfe_epoch = 0
+        pop_new = []
+        PD = 1 - self.pop_size / (self.pop_size + self.s_size)
+        for i in range(0, self.pop_size):
+            lamda_i = 2 * np.random.uniform() * PD - PD
+            pos_new = self.s_gbest[self.ID_POS] - lamda_i * \
+                (np.random.uniform() * (self.pop[i][self.ID_POS] + self.s_gbest[self.ID_POS]) / 2 - self.pop[i][self.ID_POS])
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        self.pop = self.update_target_wrapper_population(pop_new)
+        nfe_epoch += self.pop_size
 
-            ## Recalculate the fitness of all sardine
-            for i in range(0, len(s_pop)):
-                s_pop[i][self.ID_FIT] = self.get_fitness_position(s_pop[i][self.ID_POS], self.ID_MIN_PROB)
+        ## Calculate AttackPower using Eq.(10)
+        AP = self.AP * (1 - 2 * (epoch + 1) * self.epxilon)
+        if AP < 0.5:
+            alpha = int(self.s_size * np.abs(AP))
+            beta = int(self.problem.n_dims * np.abs(AP))
+            ### Random np.random.choice number of sardines which will be updated their position
+            list1 = np.random.choice(range(0, self.s_size), alpha)
+            for i in range(0, self.s_size):
+                if i in list1:
+                    #### Random np.random.choice number of dimensions in sardines updated, remove third loop by numpy vector computation
+                    pos_new = deepcopy(self.s_pop[i][self.ID_POS])
+                    list2 = np.random.choice(range(0, self.problem.n_dims), beta, replace=False)
+                    pos_new[list2] = (np.random.uniform(0, 1, self.problem.n_dims) *
+                                      (self.pop[self.ID_POS] - self.s_pop[i][self.ID_POS] + AP))[list2]
+                    pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                    self.s_pop[i] = [pos_new, None]
+        else:
+            ### Update the position of all sardine using Eq.(9)
+            for i in range(0, self.s_size):
+                pos_new = np.random.uniform() * (self.g_best[self.ID_POS] - self.s_pop[i][self.ID_POS] + AP)
+                self.s_pop[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        ## Recalculate the fitness of all sardine
+        self.s_pop = self.update_target_wrapper_population(self.s_pop)
+        nfe_epoch += self.s_size
 
-            ## Sort the population of sailfish and sardine (for reducing computational cost)
-            sf_pop = sorted(sf_pop, key=lambda temp: temp[self.ID_FIT])
-            s_pop = sorted(s_pop, key=lambda temp: temp[self.ID_FIT])
-            for i in range(0, self.pop_size):
-                for j in range(0, len(s_pop)):
-                    ### If there is a better position in sardine population.
-                    if sf_pop[i][self.ID_FIT] > s_pop[j][self.ID_FIT]:
-                        sf_pop[i] = deepcopy(s_pop[j])
-                        del s_pop[j]
-                    break   #### This simple keyword helped reducing ton of comparing operation.
-                            #### Especially when sardine pop size >> sailfish pop size
-
-            s_pop = s_pop + [self.create_solution() for _ in range(0, s_size - len(s_pop))]
-
-            sf_gbest = self.update_global_best_solution(sf_pop, self.ID_MIN_PROB, sf_gbest)
-            s_gbest = self.update_global_best_solution(s_pop, self.ID_MIN_PROB, s_gbest)
-
-            self.loss_train.append(sf_gbest[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, sf_gbest[self.ID_FIT]))
-        self.solution = sf_gbest
-        return sf_gbest[self.ID_POS], sf_gbest[self.ID_FIT], self.loss_train
+        ## Sort the population of sailfish and sardine (for reducing computational cost)
+        self.pop, g_best = self.get_global_best_solution(self.pop)
+        self.s_pop, s_gbest = self.get_global_best_solution(self.s_pop)
+        for i in range(0, self.pop_size):
+            for j in range(0, self.s_size):
+                ### If there is a better position in sardine population.
+                if self.compare_agent(self.s_pop[j], self.pop[i]):
+                    self.pop[i] = deepcopy(self.s_pop[j])
+                    del self.s_pop[j]
+                break  #### This simple keyword helped reducing ton of comparing operation.
+                #### Especially when sardine pop size >> sailfish pop size
+        temp = self.s_size - len(self.s_pop)
+        if temp == 1:
+            self.s_pop = self.s_pop + [self.create_solution(self.problem.lb, self.problem.ub)]
+        else:
+            self.s_pop = self.s_pop + self.create_population(self.s_size - len(self.s_pop))
+        _, self.s_gbest = self.get_global_best_solution(self.s_pop)
+        self.nfe_per_epoch = nfe_epoch
 
 
-class ImprovedSFO(Root):
+class ImprovedSFO(Optimizer):
     """
-    My improved version of: Sailfish Optimizer (SFO)
-    Notes:
-        + Reform Energy equation,
-        + No need parameter A and epxilon
-        + Based on idea of Opposition-based Learning
+    My improved version of: Sailfish Optimizer (I-SFO)
+
+    Notes
+    ~~~~~
+    + Reforms Energy equation
+    + Removes parameters AP (A) and epsilon
+    + Applies the idea of Opposition-based Learning technique
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + pp (float): the rate between SailFish and Sardines (N_sf = N_s * pp) = 0.25, 0.2, 0.1
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.SFO import ImprovedSFO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> pp = 0.1
+    >>> model = ImprovedSFO(problem_dict1, epoch, pop_size, pp)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Socha, K. and Dorigo, M., 2008. Ant colony optimization for continuous domains.
+    European journal of operational research, 185(3), pp.1155-1173.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, pp=0.1, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size       # SailFish pop size
-        self.pp = pp                   # the rate between SailFish and Sardines (N_sf = N_s * pp) = 0.25, 0.2, 0.1
+    def __init__(self, problem, epoch=10000, pop_size=100, pp=0.1, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100, SailFish pop size
+            pp (float): the rate between SailFish and Sardines (N_sf = N_s * pp) = 0.25, 0.2, 0.1
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.pp = self.validator.check_float("pp", pp, (0, 1.0))
 
-    def train(self):
-        s_size = int(self.pop_size / self.pp)
-        sf_pop = [self.create_solution() for _ in range(0, self.pop_size)]
-        s_pop = [self.create_solution() for _ in range(0, s_size)]
-        sf_gbest = self.get_global_best_solution(sf_pop, self.ID_FIT, self.ID_MIN_PROB)
-        s_gbest = self.get_global_best_solution(s_pop, self.ID_FIT, self.ID_MIN_PROB)
+        self.nfe_per_epoch = 2 * self.pop_size
+        self.sort_flag = True
+        self.s_size = int(self.pop_size / self.pp)
 
-        for epoch in range(0, self.epoch):
-            ## Calculate lamda_i using Eq.(7)
-            ## Update the position of sailfish using Eq.(6)
-            for i in range(0, self.pop_size):
-                PD = 1 - len(sf_pop) / ( len(sf_pop) + len(s_pop) )
-                lamda_i = 2 * uniform() * PD - PD
-                sf_pop[i][self.ID_POS] = s_gbest[self.ID_POS] - lamda_i * ( uniform() *
-                                        ( sf_gbest[self.ID_POS] + s_gbest[self.ID_POS] ) / 2 - sf_pop[i][self.ID_POS] )
+    def initialization(self):
+        self.pop = self.create_population(self.pop_size)
+        self.s_pop = self.create_population(self.s_size)
+        _, self.g_best = self.get_global_best_solution(self.pop)
+        _, self.s_gbest = self.get_global_best_solution(self.s_pop)
 
-            ## ## Calculate AttackPower using my Eq.thieu
-            #### This is our proposed, simple but effective, no need A and epxilon parameters
-            AP = 1 - epoch * 1.0 / self.epoch
-            if AP < 0.5:
-                for i in range(0, len(s_pop)):
-                    temp = (sf_gbest[self.ID_POS] + AP) / 2
-                    s_pop[i][self.ID_POS] = self.lb + self.ub - temp + uniform() * (temp - s_pop[i][self.ID_POS])
-            else:
-                ### Update the position of all sardine using Eq.(9)
-                for i in range(0, len(s_pop)):
-                    s_pop[i][self.ID_POS] = uniform() * (sf_gbest[self.ID_POS] - s_pop[i][self.ID_POS] + AP)
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            ## Recalculate the fitness of all sardine
-            for i in range(0, len(s_pop)):
-                s_pop[i][self.ID_FIT] = self.get_fitness_position(s_pop[i][self.ID_POS], self.ID_MIN_PROB)
+        Args:
+            epoch (int): The current iteration
+        """
+        ## Calculate lamda_i using Eq.(7)
+        ## Update the position of sailfish using Eq.(6)
+        nfe_epoch = 0
+        pop_new = []
+        for i in range(0, self.pop_size):
+            PD = 1 - len(self.pop) / (len(self.pop) + len(self.s_pop))
+            lamda_i = 2 * np.random.uniform() * PD - PD
+            pos_new = self.s_gbest[self.ID_POS] - \
+                lamda_i * (np.random.uniform() * (self.g_best[self.ID_POS] + self.s_gbest[self.ID_POS]) / 2 - self.pop[i][self.ID_POS])
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        self.pop = self.update_target_wrapper_population(pop_new)
+        nfe_epoch += self.pop_size
 
-            ## Sort the population of sailfish and sardine (for reducing computational cost)
-            sf_pop = sorted(sf_pop, key=lambda temp: temp[self.ID_FIT])
-            s_pop = sorted(s_pop, key=lambda temp: temp[self.ID_FIT])
-            for i in range(0, self.pop_size):
-                for j in range(0, len(s_pop)):
-                    ### If there is a better position in sardine population.
-                    if sf_pop[i][self.ID_FIT] > s_pop[j][self.ID_FIT]:
-                        sf_pop[i] = deepcopy(s_pop[j])
-                        del s_pop[j]
-                    break   #### This simple keyword helped reducing ton of comparing operation.
-                            #### Especially when sardine pop size >> sailfish pop size
-            s_pop = s_pop + [self.create_solution() for _ in range(0, s_size - len(s_pop))]
+        ## ## Calculate AttackPower using my Eq.thieu
+        #### This is our proposed, simple but effective, no need A and epxilon parameters
+        AP = 1 - epoch * 1.0 / self.epoch
+        if AP < 0.5:
+            for i in range(0, len(self.s_pop)):
+                temp = (self.g_best[self.ID_POS] + AP) / 2
+                pos_new = self.problem.lb + self.problem.ub - temp + np.random.uniform() * (temp - self.s_pop[i][self.ID_POS])
+                self.s_pop[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        else:
+            ### Update the position of all sardine using Eq.(9)
+            for i in range(0, len(self.s_pop)):
+                pos_new = np.random.uniform() * (self.g_best[self.ID_POS] - self.s_pop[i][self.ID_POS] + AP)
+                self.s_pop[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        ## Recalculate the fitness of all sardine
+        self.s_pop = self.update_target_wrapper_population(self.s_pop)
+        nfe_epoch += len(self.s_pop)
 
-            sf_gbest = self.update_global_best_solution(sf_pop, self.ID_MIN_PROB, sf_gbest)
-            s_gbest = self.update_global_best_solution(s_pop, self.ID_MIN_PROB, s_gbest)
+        ## Sort the population of sailfish and sardine (for reducing computational cost)
+        self.pop = self.get_sorted_strim_population(self.pop, self.pop_size)
+        self.s_pop = self.get_sorted_strim_population(self.s_pop, len(self.s_pop))
+        for i in range(0, self.pop_size):
+            for j in range(0, len(self.s_pop)):
+                ### If there is a better position in sardine population.
+                if self.compare_agent(self.s_pop[j], self.pop[i]):
+                    self.pop[i] = deepcopy(self.s_pop[j])
+                    del self.s_pop[j]
+                break  #### This simple keyword helped reducing ton of comparing operation.
+                #### Especially when sardine pop size >> sailfish pop size
 
-            self.loss_train.append(sf_gbest[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, sf_gbest[self.ID_FIT]))
-        self.solution = sf_gbest
-        return sf_gbest[self.ID_POS], sf_gbest[self.ID_FIT], self.loss_train
+        self.s_pop = self.s_pop + self.create_population(self.s_size - len(self.s_pop))
+        _, self.s_gbest = self.get_global_best_solution(self.s_pop)
+        self.nfe_per_epoch = nfe_epoch

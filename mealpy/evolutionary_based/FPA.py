@@ -1,73 +1,98 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 19:34, 08/04/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 19:34, 08/04/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
 import numpy as np
-import time
 from mealpy.optimizer import Optimizer
 
 
 class BaseFPA(Optimizer):
     """
-        The original version of: Flower Pollination Algorithm (FPA)
-            (Flower Pollination Algorithm for Global Optimization)
-    Link:
-        https://doi.org/10.1007/978-3-642-32894-7_27
+    The original version of: Flower Pollination Algorithm (FPA)
+
+    Links:
+        1. https://doi.org/10.1007/978-3-642-32894-7_27
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + p_s (float): [0.5, 0.95], switch probability, default = 0.8
+        + levy_multiplier: [0.2, 0.5], mutiplier factor of Levy-flight trajectory
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.evolutionary_based.FPA import BaseFPA
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> p_s = 0.8
+    >>> levy_multiplier = 0.2
+    >>> model = BaseFPA(problem_dict1, epoch, pop_size, p_s, levy_multiplier)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Yang, X.S., 2012, September. Flower pollination algorithm for global optimization. In International
+    conference on unconventional computing and natural computation (pp. 240-249). Springer, Berlin, Heidelberg.
     """
 
-    def __init__(self, problem: dict, epoch=1000, pop_size=100, p_s=0.8):
+    def __init__(self, problem, epoch=10000, pop_size=100, p_s=0.8, levy_multiplier=0.2, **kwargs):
         """
         Args:
-            problem (dict): a dictionary of your problem
-            epoch (int): maximum number of iterations, default = 1000
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             p_s (float): switch probability, default = 0.8
+            levy_multiplier (float): mutiplier factor of Levy-flight trajectory, default = 0.2
         """
-        super().__init__(problem)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.p_s = p_s
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.p_s = self.validator.check_float("p_s", p_s, (0, 1.0))
+        self.levy_multiplier = self.validator.check_float("levy_multiplier", levy_multiplier, (0, 1.0))
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        _, g_best = self.get_global_best_solution(pop)  # We don't sort the population
-        self.history_list_g_best = [g_best]
-        self.history_list_c_best = self.history_list_g_best.copy()
+    def amend_position(self, position=None, lb=None, ub=None):
+        """
+        Args:
+            position: vector position (location) of the solution.
+            lb: list of lower bound values
+            ub: list of upper bound values
 
-        for epoch in range(self.epoch):
-            time_start = time.time()
+        Returns:
+            Amended position (make the position is in bound)
+        """
+        return np.where(np.logical_and(lb <= position, position <= ub), position, np.random.uniform(lb, ub))
 
-            for i in range(0, self.pop_size):
-                if np.random.uniform() < self.p_s:
-                    levy = self.get_step_size_levy_flight(multiplier=0.001, case=-1)
-                    pos_new = pop[i][self.ID_POS] + levy * (pop[i][self.ID_POS] - self.history_list_g_best[-1][self.ID_POS])
-                else:
-                    id1, id2 = np.random.choice(list(set(range(0, self.pop_size)) - {i}), 2, replace=False)
-                    pos_new = pop[i][self.ID_POS] + np.random.uniform() * (pop[id1][self.ID_POS] - pop[id2][self.ID_POS])
-                pos_new = self.amend_position_random(pos_new)
-                fit_new = self.get_fitness_position(pos_new)
-                pop[i] = self.get_better_solution([pos_new, fit_new], pop[i])
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-                # batch size idea to update the global best
-                if self.batch_idea:
-                    if (i + 1) % self.batch_size == 0:
-                        self.update_global_best_solution(pop)
-                else:
-                    if (i + 1) % self.pop_size == 0:
-                        self.update_global_best_solution(pop)
-
-            ## Additional information for the framework
-            time_start = time.time() - time_start
-            self.history_list_epoch_time.append(time_start)
-            self.print_epoch(epoch + 1, time_start)
-            self.history_list_pop.append(pop.copy())
-
-        ## Additional information for the framework
-        self.solution = self.history_list_g_best[-1]
-        self.save_data()
-        return self.solution[self.ID_POS], self.solution[self.ID_FIT][self.ID_TAR]
+        Args:
+            epoch (int): The current iteration
+        """
+        pop = []
+        for idx in range(0, self.pop_size):
+            if np.random.uniform() < self.p_s:
+                levy = self.get_levy_flight_step(multiplier=self.levy_multiplier, case=-1)
+                pos_new = self.pop[idx][self.ID_POS] + 1.0 / np.sqrt(epoch + 1) * np.sign(np.random.random() - 0.5) * \
+                          levy * (self.pop[idx][self.ID_POS] - self.g_best[self.ID_POS])
+            else:
+                id1, id2 = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 2, replace=False)
+                pos_new = self.pop[idx][self.ID_POS] + np.random.uniform() * (self.pop[id1][self.ID_POS] - self.pop[id2][self.ID_POS])
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop.append([pos_new, None])
+        self.pop = self.update_target_wrapper_population(pop)

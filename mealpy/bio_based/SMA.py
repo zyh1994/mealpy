@@ -1,170 +1,222 @@
 #!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 20:22, 12/06/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# Created by "Thieu" at 20:22, 12/06/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import uniform, choice
-from numpy import abs, zeros, log10, where, arctanh, tanh
-from mealpy.optimizer import Root
+import numpy as np
+from copy import deepcopy
+from mealpy.optimizer import Optimizer
 
 
-class BaseSMA(Root):
+class BaseSMA(Optimizer):
     """
-        My modified version of: Slime Mould Algorithm (SMA)
-            (Slime Mould Algorithm: A New Method for Stochastic Optimization)
-        Link:
-             https://doi.org/10.1016/j.future.2020.03.055
-             https://www.researchgate.net/publication/340431861_Slime_mould_algorithm_A_new_method_for_stochastic_optimization
-        Notes:
-            + Selected 2 unique and random solution to create new solution (not to create variable) --> remove third loop in original version
-            + Check bound and update fitness after each individual move instead of after the whole population move in the original version
-            + My version not only faster but also better
-    """
+    My changed version of: Slime Mould Algorithm (SMA)
 
-    ID_WEI = 2
+    Notes
+    ~~~~~
+    + Selected 2 unique and random solution to create new solution (not to create variable) --> remove third loop in original version
+    + Check bound and update fitness after each individual move instead of after the whole population move in the original version
+    + This version not only faster but also better than the original version
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, z=0.03, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.z = z      # probability threshold
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + p_t (float): [0.01, 0.1], probability threshold (z in the paper)
 
-    def create_solution(self, minmax=0):
-        pos = uniform(self.lb, self.ub)
-        fit = self.get_fitness_position(pos)
-        weight = zeros(self.problem_size)
-        return [pos, fit, weight]
-
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        pop, g_best = self.get_sorted_pop_and_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)  # Eq.(2.6)
-
-        for epoch in range(self.epoch):
-
-            s = g_best[self.ID_FIT] - pop[-1][self.ID_FIT] + self.EPSILON  # plus eps to avoid denominator zero
-
-            # calculate the fitness weight of each slime mold
-            for i in range(0, self.pop_size):
-                # Eq.(2.5)
-                if i <= int(self.pop_size / 2):
-                    pop[i][self.ID_WEI] = 1 + uniform(0, 1, self.problem_size) * log10((g_best[self.ID_FIT] - pop[i][self.ID_FIT]) / s + 1)
-                else:
-                    pop[i][self.ID_WEI] = 1 - uniform(0, 1, self.problem_size) * log10((g_best[self.ID_FIT] - pop[i][self.ID_FIT]) / s + 1)
-
-            a = arctanh(-((epoch + 1) / self.epoch) + 1)                        # Eq.(2.4)
-            b = 1 - (epoch + 1) / self.epoch
-
-            # Update the Position of search agents
-            for i in range(0, self.pop_size):
-                if uniform() < self.z:                                          # Eq.(2.7)
-                    pos_new = uniform(self.lb, self.ub)
-                else:
-                    p = tanh(abs(pop[i][self.ID_FIT] - g_best[self.ID_FIT]))    # Eq.(2.2)
-                    vb = uniform(-a, a, self.problem_size)                      # Eq.(2.3)
-                    vc = uniform(-b, b, self.problem_size)
-
-                    # two positions randomly selected from population, apply for the whole problem size instead of 1 variable
-                    id_a, id_b = choice(list(set(range(0, self.pop_size)) - {i}), 2, replace=False)
-
-                    pos_1 = g_best[self.ID_POS] + vb * (pop[i][self.ID_WEI] * pop[id_a][self.ID_POS] - pop[id_b][self.ID_POS])
-                    pos_2 = vc * pop[i][self.ID_POS]
-                    pos_new = where(uniform(0, 1, self.problem_size) < p, pos_1, pos_2)
-
-                # Check bound and re-calculate fitness after each individual move
-                pos_new = self.amend_position_faster(pos_new)
-                fit_new = self.get_fitness_position(pos_new)
-                pop[i][self.ID_POS] = pos_new
-                pop[i][self.ID_FIT] = fit_new
-
-                # Sorted population and update the global best
-                ## batch-size idea
-                if self.batch_idea:
-                    if (i + 1) % self.batch_size == 0:
-                        pop, g_best = self.update_sorted_population_and_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-                else:
-                    if (i + 1) % self.pop_size == 0:
-                        pop, g_best = self.update_sorted_population_and_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
-
-class OriginalSMA(Root):
-    """
-        This version developed by one on my student: Slime Mould Algorithm (SMA)
-            (Slime Mould Algorithm: A New Method for Stochastic Optimization)
-        Link:
-            https://doi.org/10.1016/j.future.2020.03.055
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.bio_based.SMA import BaseSMA
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> p_t = 0.03
+    >>> model = BaseSMA(problem_dict1, epoch, pop_size, p_t)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
 
     ID_WEI = 2
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, z=0.03, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.z = z  # probability threshold
+    def __init__(self, problem, epoch=10000, pop_size=100, p_t=0.03, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            p_t (float): probability threshold (z in the paper), default = 0.03
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.p_t = self.validator.check_float("p_t", p_t, (0, 1.0))
 
-    def create_solution(self, minmax=0):
-        pos = uniform(self.lb, self.ub)
-        fit = self.get_fitness_position(pos)
-        weight = zeros(self.problem_size)
-        return [pos, fit, weight]
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = True
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        pop, g_best = self.get_sorted_pop_and_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)     # Eq.(2.6)
+    def create_solution(self, lb=None, ub=None):
+        """
+        Args:
+            lb: list of lower bound values
+            ub: list of upper bound values
 
-        for epoch in range(self.epoch):
+        Returns:
+            list: [position, target, weight]
+        """
+        position = self.generate_position(lb, ub)
+        position = self.amend_position(position, lb, ub)
+        target = self.get_target_wrapper(position)
+        weight = np.zeros(len(lb))
+        return [position, target, weight]
 
-            s = g_best[self.ID_FIT] - pop[-1][self.ID_FIT] + self.EPSILON         # plus eps to avoid denominator zero
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            # calculate the fitness weight of each slime mold
-            for i in range(0, self.pop_size):
-                # Eq.(2.5)
-                if i <= int(self.pop_size/2):
-                    pop[i][self.ID_WEI] = 1 + uniform(0, 1, self.problem_size) * log10((g_best[self.ID_FIT] - pop[i][self.ID_FIT]) / s + 1)
-                else:
-                    pop[i][self.ID_WEI] = 1 - uniform(0, 1, self.problem_size) * log10((g_best[self.ID_FIT] - pop[i][self.ID_FIT]) / s + 1)
+        Args:
+            epoch (int): The current iteration
+        """
+        # plus eps to avoid denominator zero
+        s = self.g_best[self.ID_TAR][self.ID_FIT] - self.pop[-1][self.ID_TAR][self.ID_FIT] + self.EPSILON
 
-            a = arctanh(-((epoch+1) / self.epoch) + 1)  # Eq.(2.4)
-            b = 1 - (epoch+1) / self.epoch
+        # calculate the fitness weight of each slime mold
+        for i in range(0, self.pop_size):
+            # Eq.(2.5)
+            if i <= int(self.pop_size / 2):
+                self.pop[i][self.ID_WEI] = 1 + np.random.uniform(0, 1, self.problem.n_dims) * \
+                    np.log10((self.g_best[self.ID_TAR][self.ID_FIT] - self.pop[i][self.ID_TAR][self.ID_FIT]) / s + 1)
+            else:
+                self.pop[i][self.ID_WEI] = 1 - np.random.uniform(0, 1, self.problem.n_dims) * \
+                    np.log10((self.g_best[self.ID_TAR][self.ID_FIT] - self.pop[i][self.ID_TAR][self.ID_FIT]) / s + 1)
 
-            # Update the Position of search agents
-            for i in range(0, self.pop_size):
-                if uniform() < self.z:          # Eq.(2.7)
-                    pop[i][self.ID_POS] = uniform(self.lb, self.ub)
-                else:
-                    p = tanh(abs(pop[i][self.ID_FIT] - g_best[self.ID_FIT]))        # Eq.(2.2)
-                    vb = uniform(-a, a, self.problem_size)                          # Eq.(2.3)
-                    vc = uniform(-b, b, self.problem_size)
-                    for j in range(0, self.problem_size):
-                        # two positions randomly selected from population
-                        id_a, id_b = choice(list(set(range(0, self.pop_size)) - {i}), 2, replace=False)
-                        if uniform() < p:                                           # Eq.(2.1)
-                            pop[i][self.ID_POS][j] = g_best[self.ID_POS][j] + vb[j] * (pop[i][self.ID_WEI][j] * pop[id_a][self.ID_POS][j] - pop[id_b][self.ID_POS][j])
-                        else:
-                            pop[i][self.ID_POS][j] = vc[j] * pop[i][self.ID_POS][j]
+        a = np.arctanh(-((epoch + 1) / (self.epoch+1)) + 1)  # Eq.(2.4)
+        b = 1 - (epoch + 1) / (self.epoch+1)
 
-            # Check bound and re-calculate fitness after the whole population move
-            for i in range(0, self.pop_size):
-                pos_new = self.amend_position_faster(pop[i][self.ID_POS])
-                fit_new = self.get_fitness_position(pos_new)
-                pop[i][self.ID_POS] = pos_new
-                pop[i][self.ID_FIT] = fit_new
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            # Update the Position of search agent
+            if np.random.uniform() < self.p_t:  # Eq.(2.7)
+                pos_new = self.generate_position(self.problem.lb, self.problem.ub)
+            else:
+                p = np.tanh(np.abs(self.pop[idx][self.ID_TAR][self.ID_FIT] - self.g_best[self.ID_TAR][self.ID_FIT]))  # Eq.(2.2)
+                vb = np.random.uniform(-a, a, self.problem.n_dims)  # Eq.(2.3)
+                vc = np.random.uniform(-b, b, self.problem.n_dims)
 
-            # Sorted population and update the global best
-            pop, g_best = self.update_sorted_population_and_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+                # two positions randomly selected from population, apply for the whole problem size instead of 1 variable
+                id_a, id_b = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 2, replace=False)
+
+                pos_1 = self.g_best[self.ID_POS] + vb * (self.pop[idx][self.ID_WEI] * self.pop[id_a][self.ID_POS] - self.pop[id_b][self.ID_POS])
+                pos_2 = vc * self.pop[idx][self.ID_POS]
+                pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < p, pos_1, pos_2)
+
+            # Check bound and re-calculate fitness after each individual move
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None, np.zeros(self.problem.n_dims)])
+        self.pop = self.update_target_wrapper_population(pop_new)
 
 
+class OriginalSMA(BaseSMA):
+    """
+    The original version of: Slime Mould Algorithm (SMA)
+
+    Links:
+        1. https://doi.org/10.1016/j.future.2020.03.055
+        2. https://www.researchgate.net/publication/340431861_Slime_mould_algorithm_A_new_method_for_stochastic_optimization
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + p_t (float): [0.01, 0.1], probability threshold (z in the paper)
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.bio_based.SMA import OriginalSMA
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> p_t = 0.03
+    >>> model = OriginalSMA(problem_dict1, epoch, pop_size, p_t)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Li, S., Chen, H., Wang, M., Heidari, A.A. and Mirjalili, S., 2020. Slime mould algorithm: A new method for
+    stochastic optimization. Future Generation Computer Systems, 111, pp.300-323.
+    """
+
+    ID_WEI = 2
+
+    def __init__(self, problem, epoch=10000, pop_size=100, p_t=0.03, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 1000
+            pop_size (int): number of population size, default = 100
+            p_t (float): probability threshold (z in the paper), default = 0.03
+        """
+        super().__init__(problem, epoch, pop_size, p_t, **kwargs)
+
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
+
+        Args:
+            epoch (int): The current iteration
+        """
+
+        # plus eps to avoid denominator zero
+        s = self.g_best[self.ID_TAR][self.ID_FIT] - self.pop[-1][self.ID_TAR][self.ID_FIT] + self.EPSILON
+
+        # calculate the fitness weight of each slime mold
+        for i in range(0, self.pop_size):
+            # Eq.(2.5)
+            if i <= int(self.pop_size / 2):
+                self.pop[i][self.ID_WEI] = 1 + np.random.uniform(0, 1, self.problem.n_dims) * \
+                    np.log10((self.g_best[self.ID_TAR][self.ID_FIT] - self.pop[i][self.ID_TAR][self.ID_FIT]) / s + 1)
+            else:
+                self.pop[i][self.ID_WEI] = 1 - np.random.uniform(0, 1, self.problem.n_dims) * \
+                    np.log10((self.g_best[self.ID_TAR][self.ID_FIT] - self.pop[i][self.ID_TAR][self.ID_FIT]) / s + 1)
+
+        a = np.arctanh(-((epoch + 1) / (self.epoch+1)) + 1)  # Eq.(2.4)
+        b = 1 - (epoch + 1) / (self.epoch+1)
+
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            # Update the Position of search agent
+            current_agent = deepcopy(self.pop[idx])
+            if np.random.uniform() < self.p_t:  # Eq.(2.7)
+                current_agent[self.ID_POS] = np.random.uniform(self.problem.lb, self.problem.ub)
+            else:
+                p = np.tanh(np.abs(current_agent[self.ID_TAR][self.ID_FIT] - self.g_best[self.ID_TAR][self.ID_FIT]))  # Eq.(2.2)
+                vb = np.random.uniform(-a, a, self.problem.n_dims)  # Eq.(2.3)
+                vc = np.random.uniform(-b, b, self.problem.n_dims)
+                for j in range(0, self.problem.n_dims):
+                    # two positions randomly selected from population
+                    id_a, id_b = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 2, replace=False)
+                    if np.random.uniform() < p:  # Eq.(2.1)
+                        current_agent[self.ID_POS][j] = self.g_best[self.ID_POS][j] + \
+                            vb[j] * (current_agent[self.ID_WEI][j] * self.pop[id_a][self.ID_POS][j] - self.pop[id_b][self.ID_POS][j])
+                    else:
+                        current_agent[self.ID_POS][j] = vc[j] * current_agent[self.ID_POS][j]
+            pos_new = self.amend_position(current_agent[self.ID_POS], self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None, np.zeros(self.problem.n_dims)])
+        self.pop = self.update_target_wrapper_population(pop_new)

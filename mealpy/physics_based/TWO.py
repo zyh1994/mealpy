@@ -1,277 +1,448 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 21:18, 17/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 21:18, 17/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import uniform, randn, random, normal
-from numpy import power, where, logical_and, logical_or
+import numpy as np
 from copy import deepcopy
-from mealpy.optimizer import Root
+from mealpy.optimizer import Optimizer
 
 
-class BaseTWO(Root):
+class BaseTWO(Optimizer):
     """
     The original version of: Tug of War Optimization (TWO)
-        A novel meta-heuristic algorithm: tug of war optimization
-    Link:
-        https://www.researchgate.net/publication/332088054_Tug_of_War_Optimization_Algorithm
+
+    Links:
+        1. https://www.researchgate.net/publication/332088054_Tug_of_War_Optimization_Algorithm
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.physics_based.TWO import BaseTWO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> model = BaseTWO(problem_dict1, epoch, pop_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Kaveh, A., 2017. Tug of war optimization. In Advances in metaheuristic algorithms for
+    optimal design of structures (pp. 451-487). Springer, Cham.
     """
+
     ID_POS = 0
-    ID_FIT = 1
+    ID_TAR = 1
     ID_WEIGHT = 2
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
+    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
 
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
         self.muy_s = 1
         self.muy_k = 1
         self.delta_t = 1
         self.alpha = 0.99
         self.beta = 0.1
 
-    def create_solution(self, minmax=0):
-        solution = uniform(self.lb, self.ub)
-        fitness = self.get_fitness_position(position=solution, minmax=minmax)
+    def create_solution(self, lb=None, ub=None):
+        """
+        To get the position, fitness wrapper, target and obj list
+            + A[self.ID_POS]                  --> Return: position
+            + A[self.ID_TAR]                  --> Return: [target, [obj1, obj2, ...]]
+            + A[self.ID_TAR][self.ID_FIT]     --> Return: target
+            + A[self.ID_TAR][self.ID_OBJ]     --> Return: [obj1, obj2, ...]
+
+        Returns:
+            list: wrapper of solution with format [position, target, weight]
+        """
+        position = self.generate_position(lb, ub)
+        position = self.amend_position(position, lb, ub)
+        target = self.get_target_wrapper(position)
         weight = 0.0
-        return [solution, fitness, weight]
+        return [position, target, weight]
 
-    def _update_weight__(self, teams):
-        best_fitness = max(teams, key=lambda x: x[self.ID_FIT])[self.ID_FIT]
-        worst_fitness = min(teams, key=lambda x: x[self.ID_FIT])[self.ID_FIT]
-        for i in range(self.pop_size):
-            teams[i][self.ID_WEIGHT] = (teams[i][self.ID_FIT] - worst_fitness)/(best_fitness - worst_fitness) + 1
+    def _update_weight(self, teams):
+        _, best, worst = self.get_special_solutions(teams, best=1, worst=1)
+        best_fit = best[0][self.ID_TAR][self.ID_FIT]
+        worst_fit = worst[0][self.ID_TAR][self.ID_FIT]
+        if best_fit == worst_fit:
+            for i in range(self.pop_size):
+                teams[i][self.ID_WEIGHT] = np.random.uniform(0.5, 1.5)
+        else:
+            for i in range(self.pop_size):
+                teams[i][self.ID_WEIGHT] = (teams[i][self.ID_TAR][self.ID_FIT] - worst_fit) / (best_fit - worst_fit + self.EPSILON) + 1
         return teams
 
-    def _update_fit__(self, teams):
-        for i in range(self.pop_size):
-            teams[i][self.ID_FIT] = self.get_fitness_position(teams[i][self.ID_POS], minmax=self.ID_MAX_PROB)
-        return teams
+    def initialization(self):
+        self.pop = self.create_population(self.pop_size)
+        _, self.g_best = self.get_global_best_solution(self.pop)
+        self.pop = self._update_weight(self.pop)
 
-    def _amend_and_return_pop__(self, pop_old, pop_new, g_best, epoch):
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
+
+        Args:
+            epoch (int): The current iteration
+        """
+        pop_new = deepcopy(self.pop)
         for i in range(self.pop_size):
-            for j in range(self.problem_size):
-                if pop_new[i][self.ID_POS][j] < self.lb[j] or pop_new[i][self.ID_POS][j] > self.ub[j]:
-                    if random() <= 0.5:
-                        pop_new[i][self.ID_POS][j] = g_best[self.ID_POS][j] + randn()/(epoch+1)*(g_best[self.ID_POS][j] - pop_new[i][self.ID_POS][j])
-                        if pop_new[i][self.ID_POS][j] < self.lb[j] or pop_new[i][self.ID_POS][j] > self.ub[j]:
-                            pop_new[i][self.ID_POS][j] = pop_old[i][self.ID_POS][j]
+            pos_new = pop_new[i][self.ID_POS].astype(float)
+            for j in range(self.pop_size):
+                if self.pop[i][self.ID_WEIGHT] < self.pop[j][self.ID_WEIGHT]:
+                    force = max(self.pop[i][self.ID_WEIGHT] * self.muy_s, self.pop[j][self.ID_WEIGHT] * self.muy_s)
+                    resultant_force = force - self.pop[i][self.ID_WEIGHT] * self.muy_k
+                    g = self.pop[j][self.ID_POS] - self.pop[i][self.ID_POS]
+                    acceleration = resultant_force * g / (self.pop[i][self.ID_WEIGHT] * self.muy_k)
+                    delta_x = 1 / 2 * acceleration + np.power(self.alpha, epoch + 1) * self.beta * \
+                              (self.problem.ub - self.problem.lb) * np.random.randn(self.problem.n_dims)
+                    pos_new += delta_x
+            pop_new[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        for i in range(self.pop_size):
+            pos_new = pop_new[i][self.ID_POS].astype(float)
+            for j in range(self.problem.n_dims):
+                if pos_new[j] < self.problem.lb[j] or pos_new[j] > self.problem.ub[j]:
+                    if np.random.random() <= 0.5:
+                        pos_new[j] = self.g_best[self.ID_POS][j] + np.random.randn() / (epoch + 1) * \
+                                                     (self.g_best[self.ID_POS][j] - pos_new[j])
+                        if pos_new[j] < self.problem.lb[j] or pos_new[j] > self.problem.ub[j]:
+                            pos_new[j] = self.pop[i][self.ID_POS][j]
                     else:
-                        if pop_new[i][self.ID_POS][j] < self.lb[j]:
-                           pop_new[i][self.ID_POS][j] = self.lb[j]
-                        if pop_new[i][self.ID_POS][j] > self.ub[j]:
-                           pop_new[i][self.ID_POS][j] = self.ub[j]
-        return pop_new
-
-    def train(self):
-        pop_old = [self.create_solution(minmax=self.ID_MAX_PROB) for _ in range(self.pop_size)]
-        pop_old = self._update_weight__(pop_old)
-        g_best = max(pop_old, key=lambda x: x[self.ID_FIT])
-        pop_new = deepcopy(pop_old)
-
-        for epoch in range(self.epoch):
-            for i in range(self.pop_size):
-                for j in range( self.pop_size):
-                    if pop_old[i][self.ID_WEIGHT] < pop_old[j][self.ID_WEIGHT]:
-                       force = max(pop_old[i][self.ID_WEIGHT]*self.muy_s, pop_old[j][self.ID_WEIGHT]*self.muy_s)
-                       resultant_force = force - pop_old[i][self.ID_WEIGHT]*self.muy_k
-                       g = pop_old[j][self.ID_POS] - pop_old[i][self.ID_POS]
-                       acceleration = resultant_force*g/(pop_old[i][self.ID_WEIGHT]*self.muy_k)
-                       delta_x = 1/2*acceleration + power(self.alpha,epoch+1)*self.beta*(self.ub - self.lb)*randn(self.problem_size)
-                       pop_new[i][self.ID_POS] += delta_x
-
-            pop_new = self._amend_and_return_pop__(pop_old, pop_new, g_best, epoch+1)
-            pop_new = self._update_fit__(pop_new)
-
-            for i in range(self.pop_size):
-                if pop_old[i][self.ID_FIT] < pop_new[i][self.ID_FIT]:
-                    pop_old[i] = deepcopy(pop_new[i])
-            pop_old = self._update_weight__(pop_old)
-            pop_new = deepcopy(pop_old)
-
-            current_best = self.get_global_best_solution(pop_old, self.ID_FIT, self.ID_MAX_PROB)
-            if current_best[self.ID_FIT] > g_best[self.ID_FIT]:
-                g_best = deepcopy(current_best)
-            self.loss_train.append(1.0 / g_best[self.ID_FIT] - self.EPSILON)
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, 1.0 / g_best[self.ID_FIT] - self.EPSILON))
-        g_best = [g_best[self.ID_POS], 1.0 / g_best[self.ID_FIT] - self.EPSILON]
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+                        if pos_new[j] < self.problem.lb[j]:
+                            pos_new[j] = self.problem.lb[j]
+                        if pos_new[j] > self.problem.ub[j]:
+                            pos_new[j] = self.problem.ub[j]
+            pop_new[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        pop_new = self.update_target_wrapper_population(pop_new)
+        self.pop = self.greedy_selection_population(self.pop, pop_new)
+        self.pop = self._update_weight(pop_new)
 
 
 class OppoTWO(BaseTWO):
+    """
+    The opossition-based learning version of: Tug of War Optimization (OTWO)
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        BaseTWO.__init__(self, obj_func, lb, ub, verbose, epoch, pop_size, kwargs=kwargs)
+    Notes
+    ~~~~~
+    + Applied the idea of Opposition-based learning technique
 
-    def train(self):
-        pop_temp = [self.create_solution(minmax=self.ID_MAX_PROB) for _ in range(self.pop_size)]
-        pop_oppo = deepcopy(pop_temp)
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.physics_based.TWO import OppoTWO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> model = OppoTWO(problem_dict1, epoch, pop_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+    """
+
+    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+        """
+        super().__init__(problem, epoch, pop_size, **kwargs)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+
+    def initialization(self):
+        pop_temp = self.create_population(int(self.pop_size / 2))
+        pop_oppo = []
+        for i in range(len(pop_temp)):
+            pos_opposite = self.problem.ub + self.problem.lb - pop_temp[i][self.ID_POS]
+            pos_opposite = self.amend_position(pos_opposite, self.problem.lb, self.problem.ub)
+            pop_oppo.append([pos_opposite, None, 0.0])
+        pop_oppo = self.update_target_wrapper_population(pop_oppo)
+        self.pop = pop_temp + pop_oppo
+        self.pop = self._update_weight(self.pop)
+        _, self.g_best = self.get_global_best_solution(self.pop)
+
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
+
+        Args:
+            epoch (int): The current iteration
+        """
+        ## Apply force of others solution on each individual solution
+        pop_new = deepcopy(self.pop)
         for i in range(self.pop_size):
-            item_oppo = self.ub + self.lb - pop_temp[i][self.ID_POS]
-            fit = self.get_fitness_position(item_oppo, self.ID_MAX_PROB)
-            pop_oppo[i] = [item_oppo, fit, 0.0]
-        pop_oppo = pop_temp + pop_oppo
-        pop_old = sorted(pop_oppo, key=lambda item: item[self.ID_FIT])[self.pop_size:]
-        pop_old = self._update_weight__(pop_old)
+            pos_new = pop_new[i][self.ID_POS].astype(float)
+            for j in range(self.pop_size):
+                if self.pop[i][self.ID_WEIGHT] < self.pop[j][self.ID_WEIGHT]:
+                    force = max(self.pop[i][self.ID_WEIGHT] * self.muy_s, self.pop[j][self.ID_WEIGHT] * self.muy_s)
+                    resultant_force = force - self.pop[i][self.ID_WEIGHT] * self.muy_k
+                    g = self.pop[j][self.ID_POS] - self.pop[i][self.ID_POS]
+                    acceleration = resultant_force * g / (self.pop[i][self.ID_WEIGHT] * self.muy_k)
+                    delta_x = 1 / 2 * acceleration + np.power(self.alpha, epoch + 1) * self.beta * \
+                              (self.problem.ub - self.problem.lb) * np.random.randn(self.problem.n_dims)
+                    pos_new += delta_x
+            self.pop[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
 
-        g_best = max(pop_old, key=lambda x: x[self.ID_FIT])
-        pop_new = deepcopy(pop_old)
-        for epoch in range(self.epoch):
+        ## Amend solution and update fitness value
+        for i in range(self.pop_size):
+            pos_new = self.g_best[self.ID_POS] + np.random.normal(0, 1, self.problem.n_dims) / (epoch + 1) * \
+                      (self.g_best[self.ID_POS] - pop_new[i][self.ID_POS])
+            conditions = np.logical_or(pop_new[i][self.ID_POS] < self.problem.lb, pop_new[i][self.ID_POS] > self.problem.ub)
+            conditions = np.logical_and(conditions, np.random.uniform(0, 1, self.problem.n_dims) < 0.5)
+            pos_new = np.where(conditions, pos_new, self.pop[i][self.ID_POS])
+            pop_new[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        pop_new = self.update_target_wrapper_population(pop_new)
 
-            ## Apply force of others solution on each individual solution
-            for i in range(self.pop_size):
-                for j in range(self.pop_size):
-                    if pop_old[i][self.ID_WEIGHT] < pop_old[j][self.ID_WEIGHT]:
-                        force = max(pop_old[i][self.ID_WEIGHT] * self.muy_s, pop_old[j][self.ID_WEIGHT] * self.muy_s)
-                        resultant_force = force - pop_old[i][self.ID_WEIGHT] * self.muy_k
-                        g = pop_old[j][self.ID_POS] - pop_old[i][self.ID_POS]
-                        acceleration = resultant_force * g / (pop_old[i][self.ID_WEIGHT] * self.muy_k)
-                        delta_x = 1 / 2 * acceleration + power(self.alpha, epoch + 1) * self.beta * (self.ub - self.lb) * randn(self.problem_size)
-                        pop_new[i][self.ID_POS] += delta_x
-
-            ## Amend solution and update fitness value
-            for i in range(self.pop_size):
-                pos_new = g_best[self.ID_POS] + normal(0, 1, self.problem_size) / (epoch + 1) * (g_best[self.ID_POS] - pop_new[i][self.ID_POS])
-                conditions = logical_or(pop_new[i][self.ID_POS] < self.lb, pop_new[i][self.ID_POS] > self.ub)
-                conditions = logical_and(conditions, uniform(0, 1, self.problem_size) < 0.5)
-                pos_new = where(conditions, pos_new, pop_old[i][self.ID_POS])
-                pos_new = self.amend_position_faster(pos_new)
-
-                pop_new[i][self.ID_FIT] = self.get_fitness_position(pos_new, minmax=self.ID_MAX_PROB)
-                pop_new[i][self.ID_POS] = pos_new
-
-            ## Opposition-based here
-            for i in range(self.pop_size):
-                if pop_old[i][self.ID_FIT] < pop_new[i][self.ID_FIT]:
-                    pop_old[i] = deepcopy(pop_new[i])
-                else:
-                    C_op = self.create_opposition_position(pop_old[i][self.ID_POS], g_best[self.ID_POS])
-                    fit_op = self.get_fitness_position(C_op, self.ID_MAX_PROB)
-                    if fit_op > pop_old[i][self.ID_FIT]:
-                        pop_old[i] = [C_op, fit_op, 0.0]
-            pop_old = self._update_weight__(pop_old)
-            pop_new = deepcopy(pop_old)
-
-            current_best = self.get_global_best_solution(pop_old, self.ID_FIT, self.ID_MAX_PROB)
-            if current_best[self.ID_FIT] > g_best[self.ID_FIT]:
-                g_best = deepcopy(current_best)
-            self.loss_train.append(1.0 / g_best[self.ID_FIT] - self.EPSILON)
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, 1.0 / g_best[self.ID_FIT] - self.EPSILON))
-        g_best = [g_best[self.ID_POS], 1.0 / g_best[self.ID_FIT] - self.EPSILON]
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        ## Opposition-based here
+        for i in range(self.pop_size):
+            if self.compare_agent(pop_new[i], self.pop[i]):
+                self.pop[i] = deepcopy(pop_new[i])
+            else:
+                C_op = self.create_opposition_position(self.pop[i][self.ID_POS], self.g_best[self.ID_POS])
+                C_op = self.amend_position(C_op, self.problem.lb, self.problem.ub)
+                target_op = self.get_target_wrapper(C_op)
+                if self.compare_agent([C_op, target_op], self.pop[i]):
+                    self.pop[i] = [C_op, target_op, 0.0]
+        self.pop = self._update_weight(self.pop)
 
 
 class LevyTWO(BaseTWO):
+    """
+    The Levy-flight version of: Tug of War Optimization (LTWO)
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        BaseTWO.__init__(self, obj_func, lb, ub, verbose, epoch, pop_size, kwargs=kwargs)
+    Notes
+    ~~~~~
+    + Applied the idea of Levy-flight technique
 
-    def train(self):
-        pop_old = [self.create_solution(minmax=self.ID_MAX_PROB) for _ in range(self.pop_size)]
-        pop_old = self._update_weight__(pop_old)
-        g_best = max(pop_old, key=lambda x: x[self.ID_FIT])
-        pop_new = deepcopy(pop_old)
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.physics_based.TWO import LevyTWO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> model = LevyTWO(problem_dict1, epoch, pop_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+    """
 
-        for epoch in range(self.epoch):
-            for i in range(self.pop_size):
-                for k in range( self.pop_size):
-                    if pop_old[i][self.ID_WEIGHT] < pop_old[k][self.ID_WEIGHT]:
-                       force = max(pop_old[i][self.ID_WEIGHT]*self.muy_s, pop_old[k][self.ID_WEIGHT]*self.muy_s)
-                       resultant_force = force - pop_old[i][self.ID_WEIGHT]*self.muy_k
-                       g = pop_old[k][self.ID_POS] - pop_old[i][self.ID_POS]
-                       acceleration = resultant_force*g/(pop_old[i][self.ID_WEIGHT]*self.muy_k)
-                       delta_x = 1/2*acceleration + power(self.alpha,epoch+1)*self.beta* (self.ub - self.lb) * randn(self.problem_size)
-                       pop_new[i][self.ID_POS] += delta_x
+    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+        """
+        super().__init__(problem, epoch, pop_size, **kwargs)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-            pop_new = self._amend_and_return_pop__(pop_old, pop_new, g_best, epoch+1)
-            pop_new = self._update_fit__(pop_new)
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            ### Apply levy-flight here
-            for i in range(self.pop_size):
-                if pop_old[i][self.ID_FIT] < pop_new[i][self.ID_FIT]:
-                    pop_old[i] = deepcopy(pop_new[i])
-                else:
-                    pos_new = self.levy_flight(epoch, pop_new[i][self.ID_POS], g_best[self.ID_POS])
-                    fit_new = self.get_fitness_position(pos_new, minmax=self.ID_MAX_PROB)
-                    pop_old[i] = [pos_new, fit_new, 0.0]
-            pop_old = self._update_weight__(pop_old)
-            pop_new = deepcopy(pop_old)
+        Args:
+            epoch (int): The current iteration
+        """
+        pop_new = deepcopy(self.pop)
+        for i in range(self.pop_size):
+            pos_new = self.pop[i][self.ID_POS].astype(float)
+            for k in range(self.pop_size):
+                if self.pop[i][self.ID_WEIGHT] < self.pop[k][self.ID_WEIGHT]:
+                    force = max(self.pop[i][self.ID_WEIGHT] * self.muy_s, self.pop[k][self.ID_WEIGHT] * self.muy_s)
+                    resultant_force = force - self.pop[i][self.ID_WEIGHT] * self.muy_k
+                    g = self.pop[k][self.ID_POS] - self.pop[i][self.ID_POS]
+                    acceleration = resultant_force * g / (self.pop[i][self.ID_WEIGHT] * self.muy_k)
+                    delta_x = 1 / 2 * acceleration + np.power(self.alpha, epoch + 1) * self.beta * \
+                              (self.problem.ub - self.problem.lb) * np.random.randn(self.problem.n_dims)
+                    pos_new +=delta_x
+            pop_new[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        for i in range(self.pop_size):
+            pos_new = self.pop[i][self.ID_POS].astype(float)
+            for j in range(self.problem.n_dims):
+                if pos_new[j] < self.problem.lb[j] or pos_new[j] > self.problem.ub[j]:
+                    if np.random.random() <= 0.5:
+                        pos_new[j] = self.g_best[self.ID_POS][j] + np.random.randn() / (epoch + 1) * \
+                                                     (self.g_best[self.ID_POS][j] - pos_new[j])
+                        if pos_new[j] < self.problem.lb[j] or pos_new[j] > self.problem.ub[j]:
+                            pos_new[j] = self.pop[i][self.ID_POS][j]
+                    else:
+                        if pos_new[j] < self.problem.lb[j]:
+                            pos_new[j] = self.problem.lb[j]
+                        if pos_new[j] > self.problem.ub[j]:
+                            pos_new[j] = self.problem.ub[j]
+            pop_new[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        pop_new = self.update_target_wrapper_population(pop_new)
+        self.pop = self.greedy_selection_population(self.pop, pop_new)
+        self.pop = self._update_weight(pop_new)
 
-            current_best = self.get_global_best_solution(pop_old, self.ID_FIT, self.ID_MAX_PROB)
-            if current_best[self.ID_FIT] > g_best[self.ID_FIT]:
-                g_best = deepcopy(current_best)
-            self.loss_train.append(1.0 / g_best[self.ID_FIT] - self.EPSILON)
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, 1.0 / g_best[self.ID_FIT] - self.EPSILON))
-        g_best = [g_best[self.ID_POS], 1.0 / g_best[self.ID_FIT] - self.EPSILON]
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        ### Apply levy-flight here
+        for i in range(self.pop_size):
+            if self.compare_agent(pop_new[i], self.pop[i]):
+                self.pop[i] = deepcopy(pop_new[i])
+            else:
+                levy_step = self.get_levy_flight_step(beta=1.0, multiplier=10, case=-1)
+                pos_new = pop_new[i][self.ID_POS] + np.sign(np.random.random() - 0.5) * levy_step
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                target = self.get_target_wrapper(pos_new)
+                self.pop[i] = [pos_new, target, 0.0]
+        self.pop = self._update_weight(pop_new)
 
 
-class ImprovedTWO(OppoTWO, LevyTWO):
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        BaseTWO.__init__(self, obj_func, lb, ub, verbose, epoch, pop_size, kwargs=kwargs)
-        LevyTWO.__init__(self, obj_func, lb, ub, verbose, epoch, pop_size, kwargs=kwargs)
+class EnhancedTWO(OppoTWO, LevyTWO):
+    """
+    The original version of: Enhenced Tug of War Optimization (ETWO)
 
-    def train(self):
+    Links:
+        1. https://doi.org/10.1016/j.procs.2020.03.063
 
-        pop_temp = [self.create_solution(minmax=self.ID_MAX_PROB) for _ in range(self.pop_size)]
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.physics_based.TWO import EnhancedTWO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> r_rate = 0.3
+    >>> ps_rate = 0.85
+    >>> p_field = 0.1
+    >>> n_field = 0.45
+    >>> model = EnhancedTWO(problem_dict1, epoch, pop_size, r_rate, ps_rate, p_field, n_field)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Nguyen, T., Hoang, B., Nguyen, G. and Nguyen, B.M., 2020. A new workload prediction model using
+    extreme learning machine and enhanced tug of war optimization. Procedia Computer Science, 170, pp.362-369.
+    """
+
+    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+        """
+        super().__init__(problem, epoch, pop_size, **kwargs)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+
+    def initialization(self):
+        pop_temp = self.create_population(self.pop_size)
         pop_oppo = deepcopy(pop_temp)
         for i in range(self.pop_size):
-            item_oppo = self.ub + self.lb - pop_temp[i][self.ID_POS]
-            fit = self.get_fitness_position(item_oppo, self.ID_MAX_PROB)
-            pop_oppo[i] = [item_oppo, fit, 0.0]
-        pop_oppo = pop_temp + pop_oppo
-        pop_old = sorted(pop_oppo, key=lambda item: item[self.ID_FIT])[self.pop_size:]
-        pop_old = self._update_weight__(pop_old)
+            pos_opposite = self.problem.ub + self.problem.lb - pop_temp[i][self.ID_POS]
+            pop_oppo[i][self.ID_POS] = self.amend_position(pos_opposite, self.problem.lb, self.problem.ub)
+        pop_oppo = self.update_target_wrapper_population(pop_oppo)
+        self.pop = self.get_sorted_strim_population(pop_temp + pop_oppo, self.pop_size)
+        self.pop = self._update_weight(self.pop)
+        self.g_best = deepcopy(self.pop[0])
 
-        g_best = max(pop_old, key=lambda x: x[self.ID_FIT])
-        pop_new = deepcopy(pop_old)
-        for epoch in range(self.epoch):
-            for i in range(self.pop_size):
-                for k in range(self.pop_size):
-                    if pop_old[i][self.ID_WEIGHT] < pop_old[k][self.ID_WEIGHT]:
-                        force = max(pop_old[i][self.ID_WEIGHT] * self.muy_s, pop_old[k][self.ID_WEIGHT] * self.muy_s)
-                        resultant_force = force - pop_old[i][self.ID_WEIGHT] * self.muy_k
-                        g = pop_old[k][self.ID_POS] - pop_old[i][self.ID_POS]
-                        acceleration = resultant_force * g / (pop_old[i][self.ID_WEIGHT] * self.muy_k)
-                        delta_x = 1 / 2 * acceleration + power(self.alpha, epoch + 1) * self.beta * (self.ub - self.lb) * randn(self.problem_size)
-                        pop_new[i][self.ID_POS] += delta_x
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            pop_new = self._amend_and_return_pop__(pop_old, pop_new, g_best, epoch + 1)
-            pop_new = self._update_fit__(pop_new)
-
-            for i in range(self.pop_size):
-                if pop_old[i][self.ID_FIT] < pop_new[i][self.ID_FIT]:
-                    pop_old[i] = deepcopy(pop_new[i])
-                else:
-                    C_op = self.create_opposition_position(pop_old[i][self.ID_POS], g_best[self.ID_POS])
-                    fit_op = self.get_fitness_position(C_op, self.ID_MAX_PROB)
-                    if fit_op > pop_old[i][self.ID_FIT]:
-                        pop_old[i] = [C_op, fit_op, 0.0]
+        Args:
+            epoch (int): The current iteration
+        """
+        pop_new = deepcopy(self.pop)
+        for i in range(self.pop_size):
+            pos_new = self.pop[i][self.ID_POS].astype(float)
+            for k in range(self.pop_size):
+                if self.pop[i][self.ID_WEIGHT] < self.pop[k][self.ID_WEIGHT]:
+                    force = max(self.pop[i][self.ID_WEIGHT] * self.muy_s, self.pop[k][self.ID_WEIGHT] * self.muy_s)
+                    resultant_force = force - self.pop[i][self.ID_WEIGHT] * self.muy_k
+                    g = self.pop[k][self.ID_POS] - self.pop[i][self.ID_POS]
+                    acceleration = resultant_force * g / (self.pop[i][self.ID_WEIGHT] * self.muy_k)
+                    delta_x = 1 / 2 * acceleration + np.power(self.alpha, epoch + 1) * self.beta * \
+                              (self.problem.ub - self.problem.lb) * np.random.randn(self.problem.n_dims)
+                    pos_new += delta_x
+            pop_new[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        for i in range(self.pop_size):
+            pos_new = self.pop[i][self.ID_POS].astype(float)
+            for j in range(self.problem.n_dims):
+                if pos_new[j] < self.problem.lb[j] or pos_new[j] > self.problem.ub[j]:
+                    if np.random.random() <= 0.5:
+                        pos_new[j] = self.g_best[self.ID_POS][j] + np.random.randn() / (epoch + 1) * \
+                                                     (self.g_best[self.ID_POS][j] - pos_new[j])
+                        if pos_new[j] < self.problem.lb[j] or pos_new[j] > self.problem.ub[j]:
+                            pos_new[j] = self.pop[i][self.ID_POS][j]
                     else:
-                        pos_new = self.levy_flight(epoch, pop_new[i][self.ID_POS], g_best[self.ID_POS])
-                        fit_new = self.get_fitness_position(pos_new, minmax=self.ID_MAX_PROB)
-                        pop_old[i] = [pos_new, fit_new, 0.0]
+                        if pos_new[j] < self.problem.lb[j]:
+                            pos_new[j] = self.problem.lb[j]
+                        if pos_new[j] > self.problem.ub[j]:
+                            pos_new[j] = self.problem.ub[j]
+            pop_new[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+        pop_new = self.update_target_wrapper_population(pop_new)
+        self.pop = self.greedy_selection_population(self.pop, pop_new)
+        self.pop = self._update_weight(pop_new)
 
-            pop_old = self._update_weight__(pop_old)
-            pop_new = deepcopy(pop_old)
-
-            current_best = self.get_global_best_solution(pop_old, self.ID_FIT, self.ID_MAX_PROB)
-            if current_best[self.ID_FIT] > g_best[self.ID_FIT]:
-                g_best = deepcopy(current_best)
-            self.loss_train.append(1.0 / g_best[self.ID_FIT] - self.EPSILON)
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, 1.0 / g_best[self.ID_FIT] - self.EPSILON))
-        g_best = [g_best[self.ID_POS], 1.0 / g_best[self.ID_FIT] - self.EPSILON]
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        for i in range(self.pop_size):
+            if self.compare_agent(pop_new[i], self.pop[i]):
+                self.pop[i] = deepcopy(pop_new[i])
+            else:
+                C_op = self.create_opposition_position(self.pop[i][self.ID_POS], self.g_best[self.ID_POS])
+                C_op = self.amend_position(C_op, self.problem.lb, self.problem.ub)
+                target_op = self.get_target_wrapper(C_op)
+                if self.compare_agent([C_op, target_op], self.pop[i]):
+                    self.pop[i] = [C_op, target_op, 0.0]
+                else:
+                    levy_step = self.get_levy_flight_step(beta=1.0, multiplier=0.001, case=-1)
+                    pos_new = pop_new[i][self.ID_POS] + 1.0 / np.sqrt(epoch + 1) * np.sign(np.random.random() - 0.5) * levy_step
+                    pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                    target = self.get_target_wrapper(pos_new)
+                    self.pop[i] = [pos_new, target, 0.0]
+        self.pop = self._update_weight(pop_new)

@@ -1,139 +1,182 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 17:48, 18/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                  %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 17:48, 18/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy import where
-from numpy.random import uniform, randint, normal
-from mealpy.optimizer import Root
+import numpy as np
+from mealpy.optimizer import Optimizer
 
 
-class BaseHS(Root):
+class BaseHS(Optimizer):
     """
-    My version of: Harmony Search (HS)
-    Noted:
-        - Using global best in the harmony memories
-        - Using batch-size idea
-        - Remove third for loop
+    My changed version of: Harmony Search (HS)
+
+    Links:
+        1. https://doi.org/10.1177/003754970107600201
+
+    Notes
+    ~~~~~
+    - Used the global best in the harmony memories
+    - Removed third for loop
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + c_r (float): [0.1, 0.5], Harmony Memory Consideration Rate), default = 0.15
+        + pa_r (float): [0.3, 0.8], Pitch Adjustment Rate, default=0.5
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.music_based.HS import BaseHS
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> c_r = 0.95
+    >>> pa_r = 0.05
+    >>> model = BaseHS(problem_dict1, epoch, pop_size, c_r, pa_r)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 n_new=50, c_r=0.95, pa_r=0.05, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch              # Maximum Number of Iterations
-        self.pop_size = pop_size        # Harmony Memory Size
-        self.n_new = n_new              # Number of New Harmonies
-        self.c_r = c_r                  # Harmony Memory Consideration Rate
-        self.pa_r = pa_r                # Pitch Adjustment Rate
-        self.fw = 0.0001 * (self.ub - self.lb)        # Fret Width (Bandwidth)
-        self.fw_damp = 0.9995                         # Fret Width Damp Ratio
+    def __init__(self, problem, epoch=10000, pop_size=100, c_r=0.95, pa_r=0.05, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            c_r (float): Harmony Memory Consideration Rate, default = 0.15
+            pa_r (float): Pitch Adjustment Rate, default=0.5
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.c_r = self.validator.check_float("c_r", c_r, (0, 1.0))
+        self.pa_r = self.validator.check_float("pa_r", pa_r, (0, 1.0))
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-        fw = self.fw
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+        self.fw = 0.0001 * (self.problem.ub - self.problem.lb)  # Fret Width (Bandwidth)
+        self.fw_damp = 0.9995  # Fret Width Damp Ratio
+        self.dyn_fw = self.fw
 
-        for epoch in range(self.epoch):
-            pop_new = []
-            for i in range(self.n_new):
-                # Create New Harmony Position
-                pos_new = uniform(self.lb, self.ub)
-                delta = fw * normal(self.lb, self.ub)
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-                # Use Harmony Memory
-                pos_new = where(uniform(0, 1, self.problem_size) < self.c_r, g_best[self.ID_POS], pos_new)
-                # Pitch Adjustment
-                x_new = pos_new + delta
-                pos_new = where(uniform(0, 1, self.problem_size) < self.pa_r, x_new, pos_new)
+        Args:
+            epoch (int): The current iteration
+        """
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            # Create New Harmony Position
+            pos_new = np.random.uniform(self.problem.lb, self.problem.ub)
+            delta = self.dyn_fw * np.random.normal(self.problem.lb, self.problem.ub)
 
-                pos_new = self.amend_position_faster(pos_new)           # Check the bound
-                fit = self.get_fitness_position(pos_new)                # Evaluation
-                pop_new.append([pos_new, fit])
+            # Use Harmony Memory
+            pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < self.c_r, self.g_best[self.ID_POS], pos_new)
+            # Pitch Adjustment
+            x_new = pos_new + delta
+            pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < self.pa_r, x_new, pos_new)
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        pop_new = self.update_target_wrapper_population(pop_new)
 
-                # Batch-size idea
-                if self.batch_idea:
-                    if (i+1) % self.batch_size == 0:
-                        g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-                else:
-                    if (i + 1) % self.pop_size == 0:
-                        g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
+        # Update Damp Fret Width
+        self.dyn_fw = self.dyn_fw * self.fw_damp
 
-            # Merge Harmony Memory and New Harmonies, Then sort them, Then truncate extra harmonies
-            pop = pop + pop_new
-            pop = sorted(pop, key=lambda temp: temp[self.ID_FIT])
-            pop = pop[:self.pop_size]
-
-            # Update Damp Fret Width
-            fw = fw * self.fw_damp
-
-            # Update the best position found so far
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best train: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        # Merge Harmony Memory and New Harmonies, Then sort them, Then truncate extra harmonies
+        self.pop = self.get_sorted_strim_population(self.pop + pop_new, self.pop_size)
 
 
 class OriginalHS(BaseHS):
     """
-    Original version of: Harmony Search (HS)
-        A New Heuristic Optimization Algorithm: Harmony Search
-    Link:
+    The original version of: Harmony Search (HS)
 
+    Links:
+        1. https://doi.org/10.1177/003754970107600201
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + c_r (float): [0.1, 0.5], Harmony Memory Consideration Rate), default = 0.15
+        + pa_r (float): [0.3, 0.8], Pitch Adjustment Rate, default=0.5
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.music_based.HS import OriginalHS
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>>     "verbose": True,
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> c_r = 0.95
+    >>> pa_r = 0.05
+    >>> model = OriginalHS(problem_dict1, epoch, pop_size, c_r, pa_r)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Geem, Z.W., Kim, J.H. and Loganathan, G.V., 2001. A new heuristic
+    optimization algorithm: harmony search. simulation, 76(2), pp.60-68.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 n_new=50, c_r=0.95, pa_r=0.05, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch              # Maximum Number of Iterations
-        self.pop_size = pop_size        # Harmony Memory Size
-        self.n_new = n_new              # Number of New Harmonies
-        self.c_r = c_r                  # Harmony Memory Consideration Rate
-        self.pa_r = pa_r                # Pitch Adjustment Rate
-        self.fw = 0.0001 * (self.ub - self.lb)      # Fret Width (Bandwidth)
-        self.fw_damp = 0.9995                       # Fret Width Damp Ratio
+    def __init__(self, problem, epoch=10000, pop_size=100, c_r=0.95, pa_r=0.05, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            c_r (float): Harmony Memory Consideration Rate), default = 0.15
+            pa_r (float): Pitch Adjustment Rate, default=0.5
+        """
+        super().__init__(problem, epoch, pop_size, c_r, pa_r, **kwargs)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-        fw = self.fw
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-        for epoch in range(self.epoch):
-            pop_new = []
-            for i in range(self.n_new):
-                # Create New Harmony Position
-                temp = uniform(self.lb, self.ub)
-                for j in range(self.problem_size):
-                    # Use Harmony Memory
-                    if uniform() <= self.c_r:
-                        random_index = randint(0, self.pop_size)
-                        temp[j] = pop[random_index][self.ID_POS][j]
-                    # Pitch Adjustment
-                    if uniform() <= self.pa_r:
-                        delta = fw * normal(self.lb, self.ub)       # Gaussian(Normal)
-                        temp[j] = temp[j] + delta[j]
-                temp = self.amend_position_faster(temp)             # Check the bound
-                fit = self.get_fitness_position(temp)               # Evaluation
-                pop_new.append([temp, fit])
+        Args:
+            epoch (int): The current iteration
+        """
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            pos_new = np.random.uniform(self.problem.lb, self.problem.ub)
+            for j in range(self.problem.n_dims):
+                # Use Harmony Memory
+                if np.random.uniform() <= self.c_r:
+                    random_index = np.random.randint(0, self.pop_size)
+                    pos_new[j] = self.pop[random_index][self.ID_POS][j]
+                # Pitch Adjustment
+                if np.random.uniform() <= self.pa_r:
+                    delta = self.dyn_fw * np.random.normal(self.problem.lb, self.problem.ub)  # Gaussian(Normal)
+                    pos_new[j] = pos_new[j] + delta[j]
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        pop_new = self.update_target_wrapper_population(pop_new)
 
-            # Merge Harmony Memory and New Harmonies, Then sort them, Then truncate extra harmonies
-            pop = pop + pop_new
-            pop = sorted(pop, key=lambda temp: temp[self.ID_FIT])
-            pop = pop[:self.pop_size]
+        # Update Damp Fret Width
+        self.dyn_fw = self.dyn_fw * self.fw_damp
 
-            # Update Damp Fret Width
-            fw = fw * self.fw_damp
-
-            # Update the best position found so far
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best train: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
+        # Merge Harmony Memory and New Harmonies, Then sort them, Then truncate extra harmonies
+        self.pop = self.get_sorted_strim_population(self.pop + pop_new, self.pop_size)

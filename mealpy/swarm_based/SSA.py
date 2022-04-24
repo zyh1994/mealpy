@@ -1,184 +1,251 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 11:59, 17/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 17:22, 29/05/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy import where, argmax, array, log, zeros, mean, exp, reshape, std, argmin, min, repeat, tile, ceil, arange, floor, Inf, dot
-from numpy.random import rand, uniform, normal, randint
+import numpy as np
 from copy import deepcopy
-from scipy.spatial.distance import cdist
-from mealpy.optimizer import Root
+from mealpy.optimizer import Optimizer
 
 
-class BaseSSA(Root):
+class BaseSSA(Optimizer):
     """
-        My modified version of: Social Spider Algorithm (SSA)
-            (A social spider algorithm for global optimization)
-        Link:
-            https://doi.org/10.1016/j.asoc.2015.02.014
-        Notes:
-            + Uses batch-size idea
-            + Changes the idea of intensity, which one has better intensity, others will move toward to it
+    My changed version of: Sparrow Search Algorithm (SSA)
+
+    Notes
+    ~~~~~
+    + First, I sort the algorithm and find g-best and g-worst
+    + In Eq. 4, Instead of using A+ and L, I used np.random.normal()
+    + Some components (g_best_position, fitness updated) are missing in Algorithm 1 (paper)
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + ST (float): ST in [0.5, 1.0], safety threshold value, default = 0.8
+        + PD (float): number of producers (percentage), default = 0.2
+        + SD (float): number of sparrows who perceive the danger, default = 0.1
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.SSA import BaseSSA
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> ST = 0.8
+    >>> PD = 0.2
+    >>> SD = 0.1
+    >>> model = BaseSSA(problem_dict1, epoch, pop_size, ST, PD, SD)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Xue, J. and Shen, B., 2020. A novel swarm intelligence optimization approach:
+    sparrow search algorithm. Systems Science & Control Engineering, 8(1), pp.22-34.
     """
-    ID_POS = 0
-    ID_FIT = 1
-    ID_INT = 2
-    ID_TARGET_POS = 3
-    ID_PREV_MOVE_VEC = 4
-    ID_MASK = 5
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 r_a=1, p_c=0.7, p_m=0.1, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.r_a = r_a          # the rate of vibration attenuation when propagating over the spider web.
-        self.p_c = p_c          # controls the probability of the spiders changing their dimension mask in the random walk step.
-        self.p_m = p_m          # the probability of each value in a dimension mask to be one
-
-    def create_solution(self, minmax=0):
-        """  This algorithm has different encoding mechanism, so we need to override this method
-                x: The position of s on the web.
-                train: The fitness of the current position of s.
-                target_vibration: The target vibration of s in the previous iteration.
-                intensity_vibration: intensity of vibration
-                movement_vector: The movement that s performed in the previous iteration.
-                dimension_mask: The dimension mask 1 that s employed to guide movement in the previous iteration.
-                    The dimension mask is a 0-1 binary vector of length problem size.
-
-                n_changed: The number of iterations since s has last changed its target vibration. (No need)
-
+    def __init__(self, problem, epoch=10000, pop_size=100, ST=0.8, PD=0.2, SD=0.1, **kwargs):
         """
-        x = uniform(self.lb, self.ub)
-        fit = self.get_fitness_position(x, minmax)
-        intensity = log(1. / (fit + self.EPSILON) + 1)
-        target_position = deepcopy(x)
-        previous_movement_vector = zeros(self.problem_size)
-        dimension_mask = zeros(self.problem_size)
-        return [x, fit, intensity, target_position, previous_movement_vector, dimension_mask]
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            ST (float): ST in [0.5, 1.0], safety threshold value, default = 0.8
+            PD (float): number of producers (percentage), default = 0.2
+            SD (float): number of sparrows who perceive the danger, default = 0.1
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.ST = self.validator.check_float("ST", ST, (0, 1.0))
+        self.PD = self.validator.check_float("PD", PD, (0, 1.0))
+        self.SD = self.validator.check_float("SD", SD, (0, 1.0))
+        self.n1 = int(self.PD * self.pop_size)
+        self.n2 = int(self.SD * self.pop_size)
+        self.nfe_per_epoch = 2 * self.pop_size - self.n2
+        self.sort_flag = True
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
+    def amend_position(self, position=None, lb=None, ub=None):
+        """
+        Depend on what kind of problem are we trying to solve, there will be an different amend_position
+        function to rebound the position of agent into the valid range.
 
-        # Epoch loop
-        for epoch in range(self.epoch):
-            all_pos = array([it[self.ID_POS] for it in pop])  ## Matrix (pop_size, problem_size)
-            base_distance = mean(std(all_pos, axis=0))  ## Number
-            dist = cdist(all_pos, all_pos, 'euclidean')
+        Args:
+            position: vector position (location) of the solution.
+            lb: list of lower bound values
+            ub: list of upper bound values
 
-            intensity_source = array([it[self.ID_INT] for it in pop])
-            intensity_attenuation = exp(-dist / (base_distance * self.r_a))  ## vector (pop_size)
-            intensity_receive = dot(reshape(intensity_source, (1, self.pop_size)), intensity_attenuation)  ## vector (1, pop_size)
-            index_best_intensity = argmax(intensity_receive)
+        Returns:
+            Amended position (make the position is in bound)
+        """
+        return np.where(np.logical_and(lb <= position, position <= ub), position, np.random.uniform(lb, ub))
 
-            ## Each individual loop
-            for i in range(self.pop_size):
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-                if pop[index_best_intensity][self.ID_INT] > pop[i][self.ID_INT]:
-                    pop[i][self.ID_TARGET_POS] = pop[index_best_intensity][self.ID_TARGET_POS]
-
-                if uniform() > self.p_c:  ## changing mask
-                    pop[i][self.ID_MASK] = where(uniform(0, 1, self.problem_size) < self.p_m, 0, 1)
-
-                pos_new = where(pop[i][self.ID_MASK] == 0, pop[i][self.ID_TARGET_POS], pop[randint(0, self.pop_size)][self.ID_POS])
-
-                ## Perform random walk
-                pos_new = pop[i][self.ID_POS] + normal() * (pop[i][self.ID_POS] - pop[i][self.ID_PREV_MOVE_VEC]) + \
-                          (pos_new - pop[i][self.ID_POS]) * normal()
-
-                pos_new = self.amend_position_faster(pos_new)
-
-                fit_new = self.get_fitness_position(pos_new)
-                if fit_new < pop[i][self.ID_FIT]:
-                    pop[i][self.ID_PREV_MOVE_VEC] = pos_new - pop[i][self.ID_POS]
-                    pop[i][self.ID_INT] = log(1. / (fit_new + self.EPSILON) + 1)
-                    pop[i][self.ID_POS] = pos_new
-                    pop[i][self.ID_FIT] = fit_new
-
-                ## Batch size idea
-                if self.batch_idea:
-                    if (i + 1) % self.batch_size == 0:
-                        g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
+        Args:
+            epoch (int): The current iteration
+        """
+        r2 = np.random.uniform()  # R2 in [0, 1], the alarm value, random value
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            # Using equation (3) update the sparrow’s location;
+            if idx < self.n1:
+                if r2 < self.ST:
+                    des = (epoch + 1) / (np.random.uniform() * self.epoch + self.EPSILON)
+                    if des > 5:
+                        des = np.random.normal()
+                    x_new = self.pop[idx][self.ID_POS] * np.exp(des)
                 else:
-                    if (i + 1) % self.pop_size == 0:
-                        g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+                    x_new = self.pop[idx][self.ID_POS] + np.random.normal() * np.ones(self.problem.n_dims)
+            else:
+                # Using equation (4) update the sparrow’s location;
+                _, x_p, worst = self.get_special_solutions(self.pop, best=1, worst=1)
+                g_best = x_p[0], g_worst = worst[0]
+                if idx > int(self.pop_size / 2):
+                    x_new = np.random.normal() * np.exp((g_worst[self.ID_POS] - self.pop[idx][self.ID_POS]) / (idx + 1) ** 2)
+                else:
+                    x_new = g_best[self.ID_POS] + np.abs(self.pop[idx][self.ID_POS] - g_best[self.ID_POS]) * np.random.normal()
+            pos_new = self.amend_position(x_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        pop_new = self.update_target_wrapper_population(pop_new)
+        pop_new = self.greedy_selection_population(self.pop, pop_new)
+        pop_new, best, worst = self.get_special_solutions(pop_new, best=1, worst=1)
+        g_best, g_worst = best[0], worst[0]
+        pop2 = deepcopy(pop_new[self.n2:])
+        child = []
+        for idx in range(0, len(pop2)):
+            #  Using equation (5) update the sparrow’s location;
+            if self.compare_agent(self.pop[idx], g_best):
+                x_new = pop2[idx][self.ID_POS] + \
+                        np.random.uniform(-1, 1) * (np.abs(pop2[idx][self.ID_POS] - g_worst[self.ID_POS]) /
+                                                    (pop2[idx][self.ID_TAR][self.ID_FIT] - g_worst[self.ID_TAR][self.ID_FIT] + self.EPSILON))
+            else:
+                x_new = g_best[self.ID_POS] + np.random.normal() * np.abs(pop2[idx][self.ID_POS] - g_best[self.ID_POS])
+            pos_new = self.amend_position(x_new, self.problem.lb, self.problem.ub)
+            child.append([pos_new, None])
+        child = self.update_target_wrapper_population(child)
+        child = self.greedy_selection_population(pop2, child)
+        self.pop = pop_new[:self.n2] + child
 
 
-class OriginalSSA(Root):
+class OriginalSSA(BaseSSA):
     """
-        The original version of: Social Spider Algorithm (SSA)
-            (Social Spider Algorithm - A social spider algorithm for global optimization)
-        Link:
-            + Taken from Github: https://github.com/James-Yu/SocialSpiderAlgorithm
-            + Slow convergence
+    The original version of: Sparrow Search Algorithm (SSA)
+
+    Links:
+        1. https://doi.org/10.1080/21642583.2019.1708830
+
+    Notes
+    ~~~~~
+    + The paper contains some unclear equations and symbol
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + ST (float): ST in [0.5, 1.0], safety threshold value, default = 0.8
+        + PD (float): number of producers (percentage), default = 0.2
+        + SD (float): number of sparrows who perceive the danger, default = 0.1
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.SSA import OriginalSSA
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> ST = 0.8
+    >>> PD = 0.2
+    >>> SD = 0.1
+    >>> model = OriginalSSA(problem_dict1, epoch, pop_size, ST, PD, SD)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Xue, J. and Shen, B., 2020. A novel swarm intelligence optimization approach:
+    sparrow search algorithm. Systems Science & Control Engineering, 8(1), pp.22-34.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 r_a=1, p_c=0.7, p_m=0.1, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.r_a = r_a     # the rate of vibration attenuation when propagating over the spider web.
-        self.p_c = p_c     # controls the probability of the spiders changing their dimension mask in the random walk step.
-        self.p_m = p_m     # the probability of each value in a dimension mask to be one
+    def __init__(self, problem, epoch=10000, pop_size=100, ST=0.8, PD=0.2, SD=0.1, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            ST (float): ST in [0.5, 1.0], safety threshold value, default = 0.8
+            PD (float): number of producers (percentage), default = 0.2
+            SD (float): number of sparrows who perceive the danger, default = 0.1
+        """
+        super().__init__(problem, epoch, pop_size, ST, PD, SD, **kwargs)
 
-    def train(self):
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-        g_best = [zeros(self.problem_size), Inf]
-        self.position = uniform(self.lb, self.ub, (self.pop_size, self.problem_size))
-        target_position = self.position.copy()
-        target_intensity = zeros(self.pop_size)
-        mask = zeros((self.pop_size, self.problem_size))
-        movement = zeros((self.pop_size, self.problem_size))
-        inactive = zeros(self.pop_size)
-
-        epoch = 0
-        while (epoch < self.epoch):
-            epoch += 1
-            spider_fitness = array([self.get_fitness_position(self.position[i]) for i in range(self.pop_size)])
-            base_distance = mean(std(self.position, 0))
-            distance = cdist(self.position, self.position, 'euclidean')
-
-            intensity_source = log(1. / (spider_fitness + self.EPSILON) + 1)
-            intensity_attenuation = exp(-distance / (base_distance * self.r_a))
-            intensity_receive = tile(intensity_source, self.pop_size).reshape(self.pop_size, self.pop_size) * intensity_attenuation
-
-            max_index = argmax(intensity_receive, axis=1)
-            keep_target = intensity_receive[arange(self.pop_size), max_index] <= target_intensity
-            keep_target_matrix = repeat(keep_target, self.problem_size).reshape(self.pop_size, self.problem_size)
-            inactive = inactive * keep_target + keep_target
-            target_intensity = target_intensity * keep_target + intensity_receive[arange(self.pop_size), max_index] * (1 - keep_target)
-            target_position = target_position * keep_target_matrix + self.position[max_index] * (1 - keep_target_matrix)
-
-            rand_position = self.position[floor(rand(self.pop_size * self.problem_size) * self.pop_size).astype(int), \
-                                          tile(arange(self.problem_size), self.pop_size)].reshape(self.pop_size, self.problem_size)
-            new_mask = ceil(rand(self.pop_size, self.problem_size) + rand() * self.p_m - 1)
-            keep_mask = rand(self.pop_size) < self.p_c ** inactive
-            inactive = inactive * keep_mask
-            keep_mask_matrix = repeat(keep_mask, self.problem_size).reshape(self.pop_size, self.problem_size)
-            mask = keep_mask_matrix * mask + (1 - keep_mask_matrix) * new_mask
-
-            follow_position = mask * rand_position + (1 - mask) * target_position
-            movement = repeat(rand(self.pop_size), self.problem_size).reshape(self.pop_size, self.problem_size) * movement + \
-                       (follow_position - self.position) * rand(self.pop_size, self.problem_size)
-            self.position = self.position + movement
-
-            if min(spider_fitness) < g_best[self.ID_FIT]:
-                g_best = [self.position[argmin(spider_fitness)].copy(), min(spider_fitness)]
-
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
+        Args:
+            epoch (int): The current iteration
+        """
+        r2 = np.random.uniform()  # R2 in [0, 1], the alarm value, random value
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            # Using equation (3) update the sparrow’s location;
+            if idx < self.n1:
+                if r2 < self.ST:
+                    des = (idx + 1) / (np.random.uniform() * self.epoch + self.EPSILON)
+                    if des > 5:
+                        des = np.random.uniform()
+                    x_new = self.pop[idx][self.ID_POS] * np.exp(des)
+                else:
+                    x_new = self.pop[idx][self.ID_POS] + np.random.normal() * np.ones(self.problem.n_dims)
+            else:
+                # Using equation (4) update the sparrow’s location;
+                _, x_p, worst = self.get_special_solutions(self.pop, best=1, worst=1)
+                g_best, g_worst = x_p[0], worst[0]
+                if idx > int(self.pop_size / 2):
+                    x_new = np.random.normal() * np.exp((g_worst[self.ID_POS] - self.pop[idx][self.ID_POS]) / (idx + 1) ** 2)
+                else:
+                    L = np.ones((1, self.problem.n_dims))
+                    A = np.sign(np.random.uniform(-1, 1, (1, self.problem.n_dims)))
+                    A1 = A.T * np.linalg.inv(np.matmul(A, A.T)) * L
+                    x_new = g_best[self.ID_POS] + np.matmul(np.abs(self.pop[idx][self.ID_POS] - g_best[self.ID_POS]), A1)
+            pos_new = self.amend_position(x_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        pop_new = self.update_target_wrapper_population(pop_new)
+        pop_new = self.greedy_selection_population(self.pop, pop_new)
+        pop_new, best, worst = self.get_special_solutions(pop_new, best=1, worst=1)
+        g_best, g_worst = best[0], worst[0]
+        pop2 = pop_new[self.n2:]
+        child = []
+        for idx in range(0, len(pop2)):
+            #  Using equation (5) update the sparrow’s location;
+            if self.compare_agent(self.pop[idx], g_best):
+                x_new = pop2[idx][self.ID_POS] + \
+                        np.random.uniform(-1, 1) * (np.abs(pop2[idx][self.ID_POS] - g_worst[self.ID_POS]) /
+                                                    (pop2[idx][self.ID_TAR][self.ID_FIT] - g_worst[self.ID_TAR][self.ID_FIT] + self.EPSILON))
+            else:
+                x_new = g_best[self.ID_POS] + np.random.normal() * np.abs(pop2[idx][self.ID_POS] - g_best[self.ID_POS])
+            pos_new = self.amend_position(x_new, self.problem.lb, self.problem.ub)
+            child.append([pos_new, None])
+        child = self.update_target_wrapper_population(child)
+        child = self.greedy_selection_population(pop2, child)
+        self.pop = pop_new[:self.n2] + child

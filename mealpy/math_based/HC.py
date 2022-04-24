@@ -1,102 +1,152 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu" at 10:08, 02/03/2021                                                               %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Nguyen_Thieu2                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-# ------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 10:08, 02/03/2021 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import normal
-from numpy import sum, mean, exp, array
-from mealpy.optimizer import Root
+import numpy as np
+from mealpy.optimizer import Optimizer
 
 
-class OriginalHC(Root):
+class OriginalHC(Optimizer):
     """
     The original version of: Hill Climbing (HC)
-    Noted:
-        The number of neighbour solutions are equal to user defined
-        The step size to calculate neighbour is randomized
+
+    Notes
+    ~~~~~
+    + The number of neighbour solutions are equal to user defined
+    + The step size to calculate neighbour is randomized
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + neighbour_size (int): [pop_size/2, pop_size], fixed parameter, sensitive exploitation parameter, Default: 50
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.math_based.HC import OriginalHC
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> neighbour_size = 50
+    >>> model = OriginalHC(problem_dict1, epoch, pop_size, neighbour_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Mitchell, M., Holland, J. and Forrest, S., 1993. When will a genetic algorithm
+    outperform hill climbing. Advances in neural information processing systems, 6.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, neighbour_size=50, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.neighbour_size = neighbour_size
+    def __init__(self, problem, epoch=10000, pop_size=100, neighbour_size=50, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            neighbour_size (int): fixed parameter, sensitive exploitation parameter, Default: 50
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.neighbour_size = self.validator.check_int("neighbour_size", neighbour_size, [2, self.pop_size])
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-    def create_neighbor(self, position, step_size):
-        pos_new = position + normal(0, 1, self.problem_size) * step_size
-        pos_new = self.amend_position_faster(pos_new)
-        return pos_new
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-    def train(self):
-        g_best = self.create_solution()
-
-        for epoch in range(self.epoch):
-            step_size = mean(self.ub - self.lb) * exp(-2*(epoch+1) / self.epoch)
-            pop_neighbours = []
-            for i in range(0, self.neighbour_size):
-                pos_new = self.create_neighbor(g_best[self.ID_POS], step_size)
-                fit_new = self.get_fitness_position(pos_new)
-                pop_neighbours.append([pos_new, fit_new])
-            pop_neighbours.append(g_best)
-            g_best = self.get_global_best_solution(pop_neighbours, self.ID_FIT, self.ID_MIN_PROB)
-
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        Args:
+            epoch (int): The current iteration
+        """
+        self.nfe_per_epoch = self.neighbour_size
+        step_size = np.mean(self.problem.ub - self.problem.lb) * np.exp(-2 * (epoch + 1) / self.epoch)
+        pop_neighbours = []
+        for i in range(0, self.neighbour_size):
+            pos_new = self.g_best[self.ID_POS] + np.random.normal(0, 1, self.problem.n_dims) * step_size
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_neighbours.append([pos_new, None])
+        self.pop = self.update_target_wrapper_population(pop_neighbours)
 
 
-class BaseHC(Root):
+class BaseHC(OriginalHC):
     """
-    The modified version of: Hill Climbing (HC) based on swarm-of people are trying to climb on the mountain ideas
-    Noted:
-        The number of neighbour solutions are equal to population size
-        The step size to calculate neighbour is randomized and based on ranks of solution.
-            + The guys near on top of mountain will move slower than the guys on bottom of mountain.
-            + Imagine it is like: exploration when far from global best, and exploitation when near global best
-        Who on top of mountain first will be the winner. (global optimal)
+    My changed version of: Swarm-based Hill Climbing (S-HC)
+
+    Notes
+    ~~~~~
+    + Based on swarm-of people are trying to climb on the mountain idea
+    + The number of neighbour solutions are equal to population size
+    + The step size to calculate neighbour is randomized and based on rank of solution.
+        + The guys near on top of mountain will move slower than the guys on bottom of mountain.
+        + Imagination: exploration when far from global best, and exploitation when near global best
+    + Who on top of mountain first will be the winner. (global optimal)
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + neighbour_size (int): [pop_size/2, pop_size], fixed parameter, sensitive exploitation parameter, Default: 50
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.math_based.HC import BaseHC
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> neighbour_size = 50
+    >>> model = BaseHC(problem_dict1, epoch, pop_size, neighbour_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, neighbour_size=50, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.neighbour_size = neighbour_size
+    def __init__(self, problem, epoch=10000, pop_size=100, neighbour_size=50, **kwargs):
+        """
+        Args:
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            neighbour_size (int): fixed parameter, sensitive exploitation parameter, Default: 50
+        """
+        super().__init__(problem, epoch, pop_size, neighbour_size, **kwargs)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = True
 
-    def create_neighbor(self, position, step_size):
-        pos_new = position + normal(0, 1, self.problem_size) * step_size
-        pos_new = self.amend_position_faster(pos_new)
-        return pos_new
-
-    def train(self):
-
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        pop, g_best = self.get_sorted_pop_and_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-        ranks = array(list(range(1, self.pop_size+1)))
+    def evolve(self, epoch):
+        """
+        Args:
+            epoch (int): The current iteration
+        """
+        ranks = np.array(list(range(1, self.pop_size + 1)))
         ranks = ranks / sum(ranks)
+        step_size = np.mean(self.problem.ub - self.problem.lb) * np.exp(-2 * (epoch + 1) / self.epoch)
 
-        for epoch in range(self.epoch):
-            step_size = mean(self.ub - self.lb) * exp(-2 * (epoch + 1) / self.epoch)
-
-            for i in range(0, self.pop_size):
-                ss = step_size * ranks[i]
-                pop_neighbours = []
-                for j in range(0, self.neighbour_size):
-                    pos_new = self.create_neighbor(pop[i][self.ID_POS], ss)
-                    fit_new = self.get_fitness_position(pos_new)
-                    pop_neighbours.append([pos_new, fit_new])
-                pop_neighbours.append(g_best)
-                pop[i] = self.get_global_best_solution(pop_neighbours, self.ID_FIT, self.ID_MIN_PROB)
-
-            pop, g_best = self.update_sorted_population_and_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        for idx in range(0, self.pop_size):
+            ss = step_size * ranks[idx]
+            pop_neighbours = []
+            for j in range(0, self.neighbour_size):
+                pos_new = self.pop[idx][self.ID_POS] + np.random.normal(0, 1, self.problem.n_dims) * ss
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                pop_neighbours.append([pos_new, None])
+            pop_neighbours = self.update_target_wrapper_population(pop_neighbours)
+            _, agent = self.get_global_best_solution(pop_neighbours)
+            self.pop[idx] = agent
 

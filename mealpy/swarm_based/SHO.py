@@ -1,76 +1,116 @@
-#!/usr/bin/env python                                                                                   #
-# ------------------------------------------------------------------------------------------------------#
-# Created by "Thieu Nguyen" at 10:55, 02/12/2019                                                        #
-#                                                                                                       #
-#       Email:      nguyenthieu2102@gmail.com                                                           #
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  #
-#       Github:     https://github.com/thieu1995                                                        #
-#-------------------------------------------------------------------------------------------------------#
+# !/usr/bin/env python
+# Created by "Thieu" at 10:55, 02/12/2019 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy import Inf, dot, abs, mean, array
-from numpy.random import uniform, choice
-from mealpy.optimizer import Root
+import numpy as np
+from mealpy.optimizer import Optimizer
 
 
-class BaseSHO(Root):
+class BaseSHO(Optimizer):
     """
-    My modified version: Spotted Hyena Optimizer (SHO)
-        (Spotted hyena optimizer: A novel bio-inspired based metaheuristic technique for engineering applications)
-    Link:
-        https://doi.org/10.1016/j.advengsoft.2017.05.014
+    My changed version of: Spotted Hyena Optimizer (SHO)
+
+    Links:
+        1. https://doi.org/10.1016/j.advengsoft.2017.05.014
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + h_factor (float): default = 5, coefficient linearly decreased from 5 to 0
+        + rand_v (list, tuple): (uniform min, uniform max), random vector, default = [0.5, 1]
+        + N_tried (int): default = 10,
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.SHO import BaseSHO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> h_factor = 5
+    >>> rand_v = [0.5, 1]
+    >>> N_tried = 10
+    >>> model = BaseSHO(problem_dict1, epoch, pop_size, h_factor, rand_v, N_tried)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Dhiman, G. and Kumar, V., 2017. Spotted hyena optimizer: a novel bio-inspired based metaheuristic
+    technique for engineering applications. Advances in Engineering Software, 114, pp.48-70.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 h=5, M=(0.5, 1), N_tried=10, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.h = h                  # default = 5, coefficient linearly decreased from 5 to 0
-        self.M = M                  # default = [0.5, 1], random vector in [0.5, 1]
-        self.N_tried = N_tried      # default = 10,
+    def __init__(self, problem, epoch=10000, pop_size=100, h_factor=5, rand_v=(0.5, 1), N_tried=10, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            h_factor (float): default = 5, coefficient linearly decreased from 5 to 0
+            rand_v (list, tuple): (uniform min, uniform max), random vector, default = [0.5, 1]
+            N_tried (int): default = 10,
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.h_factor = self.validator.check_float("h_factor", h_factor, (0.5, 10.0))
+        self.rand_v = self.validator.check_tuple_float("rand_v", rand_v, ([-10, 0], [0, 10]))
+        self.N_tried = self.validator.check_int("N_tried", N_tried, (1, float("inf")))
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-        # Epoch loop
-        for epoch in range(self.epoch):
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            ## Each individual loop
-            for i in range(self.pop_size):
+        Args:
+            epoch (int): The current iteration
+        """
+        nfe_epoch = 0
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            h = self.h_factor - (epoch + 1.0) * (self.h_factor / self.epoch)
+            rd1 = np.random.uniform(0, 1, self.problem.n_dims)
+            rd2 = np.random.uniform(0, 1, self.problem.n_dims)
+            B = 2 * rd1
+            E = 2 * h * rd2 - h
 
-                h = 5 - (epoch + 1.0) * (5 / self.epoch)
-                rd1 = uniform(0, 1, self.problem_size)
-                rd2 = uniform(0, 1, self.problem_size)
-                B = 2 * rd1
-                E = 2 * h * rd2 - h
-
-                if uniform() < 0.5:
-                    D_h = abs( dot(B, g_best[self.ID_POS]) - pop[i][self.ID_POS] )
-                    x_new = g_best[self.ID_POS] - dot(E, D_h)
-                else:
-                    N = 0
-                    fit = Inf
-                    while fit > g_best[self.ID_FIT] and N < self.N_tried:
-                        temp = g_best[self.ID_POS] + uniform(self.M[0], self.M[1], self.problem_size)
-                        fit = self.get_fitness_position(temp)
+            if np.random.rand() < 0.5:
+                D_h = np.abs(np.dot(B, self.g_best[self.ID_POS]) - self.pop[idx][self.ID_POS])
+                pos_new = self.g_best[self.ID_POS] - np.dot(E, D_h)
+            else:
+                N = 1
+                for i in range(0, self.N_tried):
+                    pos_temp = self.g_best[self.ID_POS] + np.random.uniform(self.rand_v[0], self.rand_v[1]) * \
+                              np.random.uniform(self.problem.lb, self.problem.ub)
+                    pos_temp = self.amend_position(pos_temp, self.problem.lb, self.problem.ub)
+                    target = self.get_target_wrapper(pos_temp)
+                    if self.compare_agent([pos_temp, target], self.g_best):
                         N += 1
-                    circle_list = []
-                    idx_list = choice(range(0, self.pop_size), N, replace=False)
-                    for j in range(0, N):
-                        D_h = abs(dot(B, g_best[self.ID_POS]) - pop[idx_list[j]][self.ID_POS])
-                        p_k = g_best[self.ID_POS] - dot(E, D_h)
-                        circle_list.append(p_k)
-                    x_new = mean(array(circle_list))
-                x_new = self.amend_position_faster(x_new)
-                fit = self.get_fitness_position(x_new)
-                if fit < pop[i][self.ID_FIT]:
-                    pop[i] = [x_new, fit]
-
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("Epoch: {}, Best fit: {}".format(epoch+1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+                        nfe_epoch += 1
+                        break
+                    N += 1
+                circle_list = []
+                idx_list = np.random.choice(range(0, self.pop_size), N, replace=False)
+                for j in range(0, N):
+                    D_h = np.abs(np.dot(B, self.g_best[self.ID_POS]) - self.pop[idx_list[j]][self.ID_POS])
+                    p_k = self.g_best[self.ID_POS] - np.dot(E, D_h)
+                    circle_list.append(p_k)
+                pos_new = np.mean(np.array(circle_list), axis=0)
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        pop_new = self.update_target_wrapper_population(pop_new)
+        self.pop = self.greedy_selection_population(self.pop, pop_new)
+        nfe_epoch += self.pop_size
+        self.nfe_per_epoch = nfe_epoch

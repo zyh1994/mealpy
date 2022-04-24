@@ -1,96 +1,127 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 14:52, 17/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 14:52, 17/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy import abs, pi, ceil, sqrt, sin, clip
-from numpy.random import uniform
+import numpy as np
 from math import gamma
 from copy import deepcopy
-from mealpy.optimizer import Root
+from mealpy.optimizer import Optimizer
 
 
-class BaseMSA(Root):
+class BaseMSA(Optimizer):
     """
-    My modified version of: Moth Search Algorithm (MSA)
-        (Moth search algorithm: a bio-inspired metaheuristic algorithm for global optimization problems.)
-    Link:
-        https://www.mathworks.com/matlabcentral/fileexchange/59010-moth-search-ms-algorithm
-        http://doi.org/10.1007/s12293-016-0212-3
-    Notes:
-        + Simply the matlab version above is not working (or bad at convergence characteristics).
+    My changed version of: Moth Search Algorithm (MSA)
+
+    Links:
+        1. https://www.mathworks.com/matlabcentral/fileexchange/59010-moth-search-ms-algorithm
+        2. https://doi.org/10.1007/s12293-016-0212-3
+
+    Notes
+    ~~~~~
+    + The matlab version of original paper is not good (especially convergence chart)
+    + I add Normal random number (Gaussian distribution) in each updating equation (Better performance)
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + n_best (int): [3, 10], how many of the best moths to keep from one generation to the next, default=5
+        + partition (float): [0.3, 0.8], The proportional of first partition, default=0.5
+        + max_step_size (float): [0.5, 2.0], Max step size used in Levy-flight technique, default=1.0
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.MSA import BaseMSA
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> n_best = 5
+    >>> partition = 0.5
+    >>> max_step_size = 1.0
+    >>> model = BaseMSA(problem_dict1, epoch, pop_size, n_best, partition, max_step_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Wang, G.G., 2018. Moth search algorithm: a bio-inspired metaheuristic algorithm for
+    global optimization problems. Memetic Computing, 10(2), pp.151-164.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 n_best=5, partition=0.5, max_step_size=1.0, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.n_best = n_best            # how many of the best moths to keep from one generation to the next
-        self.partition = partition      # The proportional of first partition
-        self.max_step_size = max_step_size
-        self.n_moth1 = int(ceil(self.partition * self.pop_size))     # np1 in paper
-        self.n_moth2 = self.pop_size - self.n_moth1                  # np2 in paper
-        self.golden_ratio = (sqrt(5) - 1) / 2.0     # you can change this ratio so as to get much better performance
+    def __init__(self, problem, epoch=10000, pop_size=100, n_best=5, partition=0.5, max_step_size=1.0, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            n_best (int): how many of the best moths to keep from one generation to the next, default=5
+            partition (float): The proportional of first partition, default=0.5
+            max_step_size (float): Max step size used in Levy-flight technique, default=1.0
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.n_best = self.validator.check_int("n_best", n_best, [2, int(self.pop_size/2)])
+        self.partition = self.validator.check_float("partition", partition, (0, 1.0))
+        self.max_step_size = self.validator.check_float("max_step_size", max_step_size, (0, 5.0))
 
-    def _levy_walk__(self, iteration):
-        beta = 1.5      # Eq. 2.23
-        sigma = (gamma(1+beta) * sin(pi*(beta-1)/2) / (gamma(beta/2) * (beta-1) * 2 ** ((beta-2) / 2))) ** (1/(beta-1))
-        u = uniform(self.lb, self.ub) * sigma
-        v = uniform(self.lb, self.ub)
-        step = u / abs(v) ** (1.0 / (beta - 1))     # Eq. 2.21
-        scale = self.max_step_size / (iteration+1)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = True
+        # np1 in paper
+        self.n_moth1 = int(np.ceil(self.partition * self.pop_size))
+        # np2 in paper, we actually don't need this variable
+        self.n_moth2 = self.pop_size - self.n_moth1
+        # you can change this ratio so as to get much better performance
+        self.golden_ratio = (np.sqrt(5) - 1) / 2.0
+
+    def _levy_walk(self, iteration):
+        beta = 1.5  # Eq. 2.23
+        sigma = (gamma(1 + beta) * np.sin(np.pi * (beta - 1) / 2) / (gamma(beta / 2) * (beta - 1) * 2 ** ((beta - 2) / 2))) ** (1 / (beta - 1))
+        u = np.random.uniform(self.problem.lb, self.problem.ub) * sigma
+        v = np.random.uniform(self.problem.lb, self.problem.ub)
+        step = u / np.abs(v) ** (1.0 / (beta - 1))  # Eq. 2.21
+        scale = self.max_step_size / (iteration + 1)
         delta_x = scale * step
         return delta_x
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        pop = sorted(pop, key=lambda temp: temp[self.ID_FIT])
-        pop_best = deepcopy(pop[:self.n_best])
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-        for epoch in range(self.epoch):
+        Args:
+            epoch (int): The current iteration
+        """
+        pop_best = deepcopy(self.pop[:self.n_best])
+
+        pop_new = []
+        for idx in range(0, self.pop_size):
             # Migration operator
-            for i in range(0, self.n_moth1):
-                #scale = self.max_step_size / (epoch+1)       # Smaller step for local walk
-                temp = pop[i][self.ID_POS] + self._levy_walk__(epoch)
-                temp = clip(temp, self.lb, self.ub)
-                fit = self.get_fitness_position(temp)
-                if fit < pop[i][self.ID_FIT]:
-                    pop[i] = [temp, fit]
+            if idx < self.n_moth1:
+                # scale = self.max_step_size / (epoch+1)       # Smaller step for local walk
+                pos_new = self.pop[idx][self.ID_POS] + np.random.normal() * self._levy_walk(epoch)
+            else:
+                # Flying in a straight line
+                temp_case1 = self.pop[idx][self.ID_POS] + np.random.normal() * \
+                             self.golden_ratio * (self.g_best[self.ID_POS] - self.pop[idx][self.ID_POS])
+                temp_case2 = self.pop[idx][self.ID_POS] + np.random.normal() * \
+                             (1.0 / self.golden_ratio) * (self.g_best[self.ID_POS] - self.pop[idx][self.ID_POS])
+                pos_new = np.where(np.random.uniform(self.problem.n_dims) < 0.5, temp_case2, temp_case1)
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        pop_new = self.update_target_wrapper_population(pop_new)
+        pop_new = self.greedy_selection_population(self.pop, pop_new)
 
-            # Flying in a straight line
-            for i in range(self.n_moth1, self.n_moth2):
-                temp = pop[i][self.ID_POS]
-                for j in range(0, self.problem_size):
-                    if uniform() >= 0.5:
-                        temp[j] = pop[i][self.ID_POS][j] + self.golden_ratio * (pop_best[0][self.ID_POS][j] - pop[i][self.ID_POS][j])
-                    else:
-                        temp[j] = pop[i][self.ID_POS][j] + (1.0/self.golden_ratio) * (pop_best[0][self.ID_POS][j] - pop[i][self.ID_POS][j])
-
-                temp = uniform() * temp
-                temp = clip(temp, self.lb, self.ub)
-                fit = self.get_fitness_position(temp)
-                if fit < pop[i][self.ID_FIT]:
-                    pop[i][self.ID_POS] = [temp, fit]
-
-            # Replace the worst with the previous generation's elites.
-            for i in range(0, self.n_best):
-                pop[-1-i] = deepcopy(pop_best[i])
-
-            pop = sorted(pop, key=lambda temp: temp[self.ID_FIT])
-            pop_current_best = deepcopy(pop[:self.n_best])
-
-            # Update the global best population
-            for i in range(0, self.n_best):
-                if pop_best[i][self.ID_FIT] > pop_current_best[i][self.ID_FIT]:
-                    pop_best[i] = deepcopy(pop_current_best[i])
-
-            self.loss_train.append(pop_best[0][self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, pop_best[0][self.ID_FIT]))
-        self.solution = pop_best[0]
-        return pop_best[0][self.ID_POS], pop_best[0][self.ID_FIT], self.loss_train
+        self.pop, _ = self.get_global_best_solution(pop_new)
+        # Replace the worst with the previous generation's elites.
+        for i in range(0, self.n_best):
+            self.pop[-1 - i] = deepcopy(pop_best[i])

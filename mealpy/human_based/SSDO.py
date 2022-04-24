@@ -1,129 +1,111 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 11:17, 18/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 11:17, 18/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy import array, mean, sin, cos
-from numpy.random import uniform
+import numpy as np
 from copy import deepcopy
-from mealpy.optimizer import Root
+from mealpy.optimizer import Optimizer
 
 
-class BaseSSDO(Root):
+class BaseSSDO(Optimizer):
     """
     The original version of: Social Ski-Driver Optimization (SSDO)
-        (Parameters optimization of support vector machines for imbalanced data using social ski driver algorithm)
-    Noted:
-        https://doi.org/10.1007/s00521-019-04159-z
-        https://www.mathworks.com/matlabcentral/fileexchange/71210-social-ski-driver-ssd-optimization-algorithm-2019
+
+    Links:
+       1. https://doi.org/10.1007/s00521-019-04159-z
+       2. https://www.mathworks.com/matlabcentral/fileexchange/71210-social-ski-driver-ssd-optimization-algorithm-2019
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.human_based.SSDO import BaseSSDO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> model = BaseSSDO(problem_dict1, epoch, pop_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Tharwat, A. and Gabel, T., 2020. Parameters optimization of support vector machines for imbalanced
+    data using social ski driver algorithm. Neural Computing and Applications, 32(11), pp.6925-6938.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
+    ID_VEL = 2
+    ID_LOC = 3
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
+    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-        list_velocity = uniform(self.lb, self.ub, (self.pop_size, self.problem_size))
-        list_local_best = array([item[self.ID_POS] for item in pop])
+    def create_solution(self, lb=None, ub=None):
+        """
+        To get the position, fitness wrapper, target and obj list
+            + A[self.ID_POS]                  --> Return: position
+            + A[self.ID_TAR]                  --> Return: [target, [obj1, obj2, ...]]
+            + A[self.ID_TAR][self.ID_FIT]     --> Return: target
+            + A[self.ID_TAR][self.ID_OBJ]     --> Return: [obj1, obj2, ...]
 
-        for epoch in range(self.epoch):
-            c = 2 - epoch * (2.0 / self.epoch)  # a decreases linearly from 2 to 0
+        Returns:
+            list: wrapper of solution with format [position, target, velocity, best_local_position]
+        """
+        position = self.generate_position(lb, ub)
+        position = self.amend_position(position, lb, ub)
+        target = self.get_target_wrapper(position)
+        velocity = np.random.uniform(lb, ub)
+        pos_local = deepcopy(position)
+        return [position, target, velocity, pos_local]
 
-            # Update Position based on velocity
-            for i in range(0, self.pop_size):
-                pos_new = pop[i][self.ID_POS] + list_velocity[i]
-                pos_new = self.amend_position_faster(pos_new)
-                fit_new = self.get_fitness_position(pos_new)
-                if fit_new < pop[i][self.ID_FIT]:
-                    list_local_best[i] = deepcopy(pos_new)
-                pop[i] = [pos_new, fit_new]
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            ## Calculate the mean of the best three solutions in each dimension. Eq 9
-            pop = sorted(pop, key=lambda item: item[self.ID_FIT])
-            pop_best_3 = deepcopy(pop[:3])
-            pos_list_3 = array([item[self.ID_POS] for item in pop_best_3])
-            pos_mean = mean(pos_list_3)
+        Args:
+            epoch (int): The current iteration
+        """
+        c = 2 - epoch * (2.0 / self.epoch)  # a decreases linearly from 2 to 0
 
-            # Updating velocity vectors
-            for i in range(0, self.pop_size):
-                r1 = uniform()  # r1, r2 is a random number in [0,1]
-                r2 = uniform()
-                if r2 <= 0.5:     ## Use Sine function to move
-                    vel_new = c * sin(r1) * (list_local_best[i] - pop[i][self.ID_POS]) + sin(r1) * (pos_mean - pop[i][self.ID_POS])
-                else:                   ## Use Cosine function to move
-                    vel_new = c * cos(r1) * (list_local_best[i] - pop[i][self.ID_POS]) + cos(r1) * (pos_mean - pop[i][self.ID_POS])
-                list_velocity[i] = deepcopy(vel_new)
+        ## Calculate the mean of the best three solutions in each dimension. Eq 9
+        _, pop_best3, _ = self.get_special_solutions(self.pop, best=3)
+        pos_mean = np.mean(np.array([item[self.ID_POS] for item in pop_best3]))
 
-            # Update the global best
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print(">Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        pop_new = deepcopy(self.pop)
+        # Updating velocity vectors
+        for i in range(0, self.pop_size):
+            r1 = np.random.uniform()  # r1, r2 is a random number in [0,1]
+            r2 = np.random.uniform()
+            if r2 <= 0.5:  ## Use Sine function to move
+                vel_new = c * np.sin(r1) * (self.pop[i][self.ID_LOC] - self.pop[i][self.ID_POS]) + np.sin(r1) * (pos_mean - self.pop[i][self.ID_POS])
+            else:  ## Use Cosine function to move
+                vel_new = c * np.cos(r1) * (self.pop[i][self.ID_LOC] - self.pop[i][self.ID_POS]) + np.cos(r1) * (pos_mean - self.pop[i][self.ID_POS])
+            pop_new[i][self.ID_VEL] = vel_new
 
-
-class LevySSDO(BaseSSDO):
-    """
-        My levy version of: Social Ski-Driver (SSD) optimization algorithm based on Levy_flight
-    """
-
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        BaseSSDO.__init__(self, obj_func, lb, ub, verbose, epoch, pop_size, kwargs=kwargs)
-
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-
-        list_velocity = uniform(self.lb, self.ub, (self.pop_size, self.problem_size))
-        list_local_best = array([item[self.ID_POS] for item in pop])
-
-        for epoch in range(self.epoch):
-            c = 2 - epoch * (2.0 / self.epoch)  # a decreases linearly from 2 to 0
-
-            # Update Position based on velocity
-            for i in range(0, self.pop_size):
-                ## In real life, there are lots of cases skydrive person death because they can't follow the instructor,
-                # or something went wrong with their parasol. Inspired by that I added levy-flight is the a bold moves
-                if uniform() < 0.7:
-                    pos_new = pop[i][self.ID_POS] + list_velocity[i]
-                else:
-                    pos_new = self.levy_flight(epoch, pop[i][self.ID_POS], g_best[self.ID_POS], case=1)
-                pos_new = self.amend_position_faster(pos_new)
-                fit_new = self.get_fitness_position(pos_new)
-                if fit_new < pop[i][self.ID_FIT]:
-                    list_local_best[i] = deepcopy(pos_new)
-                pop[i] = [pos_new, fit_new]
-
-            ## Calculate the mean of the best three solutions in each dimension. Eq 9
-            pop = sorted(pop, key=lambda item: item[self.ID_FIT])
-            pop_best_3 = deepcopy(pop[:3])
-            pos_list_3 = array([item[self.ID_POS] for item in pop_best_3])
-            pos_mean = mean(pos_list_3)
-
-            # Updating velocity vectors
-            for i in range(0, self.pop_size):
-                r1 = uniform()  # r1, r2 is a random number in [0,1]
-                r2 = uniform()
-                if r2 <= 0.5:  ## Use Sine function to move
-                    vel_new = c * sin(r1) * (list_local_best[i] - pop[i][self.ID_POS]) + sin(r1) * (pos_mean - pop[i][self.ID_POS])
-                else:  ## Use Cosine function to move
-                    vel_new = c * cos(r1) * (list_local_best[i] - pop[i][self.ID_POS]) + cos(r1) * (pos_mean - pop[i][self.ID_POS])
-                list_velocity[i] = deepcopy(vel_new)
-
-            # Update the global best
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print(">Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
+        ## Reproduction
+        for idx in range(0, self.pop_size):
+            pos_new = np.random.uniform() * pop_new[idx][self.ID_POS] + pop_new[idx][self.ID_VEL]
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new[idx][self.ID_POS] = pos_new
+        pop_new = self.update_target_wrapper_population(pop_new)
+        self.pop = self.greedy_selection_population(self.pop, pop_new)

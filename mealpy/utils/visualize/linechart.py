@@ -7,9 +7,11 @@
 #       Github:     https://github.com/thieu1995                                                        %
 # ------------------------------------------------------------------------------------------------------%
 
-import platform
+from pathlib import Path
+import numpy as np
+import re
 from matplotlib import pyplot as plt
-from numpy import arange
+import platform
 
 
 LIST_LINESTYLES = [
@@ -30,9 +32,29 @@ LIST_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
               '#bcbd22', '#17becf']
 
 
+def __clean_filename__(filename):
+    chars_to_remove = ["`", "~", "!", "@", "#", "$", "%", "^", "&", "*", ":", ",", "<", ">", ";", "+", "|"]
+    regular_expression = '[' + re.escape(''.join(chars_to_remove)) + ']'
+
+    temp = filename.encode("ascii", "ignore")
+    fname = temp.decode()                           # Removed all non-ascii characters
+    fname = re.sub(regular_expression, '', fname)   # Removed all special characters
+    fname.replace("_", "-")                         # Replaced _ by -
+    return fname
+
+
+def __check_filepath__(filename):
+    filename.replace("\\", "/")                     # For better handling the parent folder
+    if "/" in filename:
+        list_names = filename.split("/")[:-1]       # Remove last element because it is filename
+        filepath = "/".join(list_names)
+        Path(filepath).mkdir(parents=True, exist_ok=True)
+    return filename
+
+
 def _draw_line_(data=None, title=None, linestyle='-', color='b', x_label="#Iteration", y_label="Function Value",
                      filename=None, exts=(".png", ".pdf"), verbose=True):
-    x = arange(0, len(data))
+    x = np.arange(0, len(data))
     y = data
     plt.title(title)
     plt.xlabel(x_label)
@@ -40,8 +62,9 @@ def _draw_line_(data=None, title=None, linestyle='-', color='b', x_label="#Itera
     plt.plot(x, y, linestyle=linestyle, color=color,)
     plt.legend()  # show a legend on the plot
     if filename is not None:
+        filepath = __check_filepath__(__clean_filename__(filename))
         for idx, ext in enumerate(exts):
-            plt.savefig(f"./{filename}{ext}", bbox_inches='tight')
+            plt.savefig(f"{filepath}{ext}", bbox_inches='tight')
     if platform.system() != "Linux" and verbose:
         plt.show()
     plt.close()
@@ -49,7 +72,7 @@ def _draw_line_(data=None, title=None, linestyle='-', color='b', x_label="#Itera
 
 def _draw_multi_line_(data=None, title=None, list_legends=None, list_styles=None, list_colors=None,
                       x_label="#Iteration", y_label="Function Value", filename=None, exts=(".png", ".pdf"), verbose=True):
-    x = arange(0, len(data[0]))
+    x = np.arange(0, len(data[0]))
     for idx, y in enumerate(data):
         plt.plot(x, y, label=list_legends[idx], markerfacecolor=list_colors[idx], linestyle=list_styles[idx])
 
@@ -58,8 +81,9 @@ def _draw_multi_line_(data=None, title=None, list_legends=None, list_styles=None
     plt.ylabel(y_label)
     plt.legend()  # show a legend on the plot
     if filename is not None:
+        filepath = __check_filepath__(__clean_filename__(filename))
         for idx, ext in enumerate(exts):
-            plt.savefig(f"./{filename}{ext}", bbox_inches='tight')
+            plt.savefig(f"{filepath}{ext}", bbox_inches='tight')
     if platform.system() != "Linux" and verbose:
         plt.show()
     plt.close()
@@ -69,7 +93,7 @@ def _draw_multi_line_in_same_figure_(data=None, title=None, list_legends=None, l
                                      x_label="#Iteration", y_label="Objective", filename=None, exts=(".png", ".pdf"), verbose=True):
     n_lines = len(data)
     len_lines = len(data[0])
-    x = arange(0, len_lines)
+    x = np.arange(0, len_lines)
 
     if n_lines == 1:
         fig, ax = plt.subplots()
@@ -90,10 +114,10 @@ def _draw_multi_line_in_same_figure_(data=None, title=None, list_legends=None, l
             if idx == (n_lines - 1):
                 ax.set_xlabel(x_label)
 
-
     if filename is not None:
+        filepath = __check_filepath__(__clean_filename__(filename))
         for idx, ext in enumerate(exts):
-            plt.savefig(f"./{filename}{ext}", bbox_inches='tight')
+            plt.savefig(f"{filepath}{ext}", bbox_inches='tight')
     if platform.system() != "Linux" and verbose:
         plt.show()
     plt.close()
@@ -134,23 +158,31 @@ def export_objectives_chart(data=None, title="Objectives chart", list_legends=No
                                      x_label=x_label, y_label=y_label, filename=filename, exts=exts, verbose=verbose)
 
 
-def export_trajectory_chart(data=None, title="Trajectory of some first agents after generations", list_legends=None,
+def export_trajectory_chart(data=None, n_dimensions=1, title="Trajectory of some first agents after generations", list_legends=None,
                                  list_styles=None, list_colors=None, x_label="#Iteration", y_label="X1",
                                  filename="1d_trajectory", exts=(".png", ".pdf"), verbose=True):
     if list_styles is None:
         list_styles = LIST_LINESTYLES[:len(data)]
     if list_colors is None:
         list_colors = LIST_COLORS[:len(data)]
-    _draw_multi_line_(data=data, title=title, list_legends=list_legends, list_styles=list_styles, list_colors=list_colors,
-                      x_label=x_label, y_label=y_label, filename=filename, exts=exts, verbose=verbose)
 
+    if n_dimensions == 1:
+        x = np.arange(0, len(data[0]))
+        for idx, y in enumerate(data):
+            plt.plot(x, y, label=list_legends[idx], markerfacecolor=list_colors[idx], linestyle=list_styles[idx])
+    elif n_dimensions == 2:
+        for idx, point in enumerate(data):
+            plt.plot(point[0], point[1], label=list_legends[idx], markerfacecolor=list_colors[idx], linestyle=list_styles[idx])
 
-
-
-
-
-
-
-
-
+    plt.title(title)
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.legend()  # show a legend on the plot
+    if filename is not None:
+        filepath = __check_filepath__(__clean_filename__(filename))
+        for idx, ext in enumerate(exts):
+            plt.savefig(f"{filepath}{ext}", bbox_inches='tight')
+    if platform.system() != "Linux" and verbose:
+        plt.show()
+    plt.close()
 

@@ -1,106 +1,156 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu" at 15:37, 19/03/2021                                                               %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Nguyen_Thieu2                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-# ------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 15:37, 19/03/2021 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from mealpy.optimizer import Root
-from numpy import array, mean, exp, ones
-from numpy.random import rand, normal
+import numpy as np
+from copy import deepcopy
+from mealpy.optimizer import Optimizer
 
 
-class OriginalHGS(Root):
+class OriginalHGS(Optimizer):
     """
-        The original version of: Hunger Games Search (HGS)
-        Link:
-            https://aliasgharheidari.com/HGS.html
-            Hunger Games Search (HGS): Visions, Conception, Implementation, Deep Analysis, Perspectives, and Towards Performance Shifts
+    The original version of: Hunger Games Search (HGS)
+
+    Links:
+        https://aliasgharheidari.com/HGS.html
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + PUP (float): [0.01, 0.2], The probability of updating position (L in the paper), default = 0.08
+        + LH (float): [1000, 20000], Largest hunger / threshold, default = 10000
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.HGS import OriginalHGS
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> PUP = 0.08
+    >>> LH = 10000
+    >>> model = OriginalHGS(problem_dict1, epoch, pop_size, PUP, LH)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Yang, Y., Chen, H., Heidari, A.A. and Gandomi, A.H., 2021. Hunger games search: Visions, conception, implementation,
+    deep analysis, perspectives, and towards performance shifts. Expert Systems with Applications, 177, p.114864.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, L=0.08, LH=10000, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.L = L          # Switching updating  position probability
-        self.LH = LH        # Largest hunger / threshold
+    ID_HUN = 2  # ID for Hunger value
 
-    def get_hunger_list(self, pop=None, hunger_list=array, g_best=None, g_worst=None):
-        # min_index = pop.index(min(pop, key=lambda x: x[self.ID_FIT]))
-        # Eq (2.8) and (2.9)
-        for i in range(0, self.pop_size):
-            r = rand()
-            # space: since we pass lower bound and upper bound as list. Better take the mean of them.
-            space = mean(self.ub - self.lb)
-            H = (pop[i][self.ID_FIT] - g_best[self.ID_FIT]) / (g_worst[self.ID_FIT] - g_best[self.ID_FIT] + self.EPSILON) * r * 2 * space
-            if H < self.LH:
-                H = self.LH * (1 + r)
-            hunger_list[i] += H
+    def __init__(self, problem, epoch=10000, pop_size=100, PUP=0.08, LH=10000, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            PUP (float): The probability of updating position (L in the paper), default = 0.08
+            LH (float): Largest hunger / threshold, default = 10000
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.PUP = self.validator.check_float("PUP", PUP, (0, 1.0))
+        self.LH = self.validator.check_float("LH", LH, [1000, 20000])
 
-            if g_best[self.ID_FIT] == pop[i][self.ID_FIT]:
-                hunger_list[i] = 0
-        return hunger_list
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+
+    def create_solution(self, lb=None, ub=None):
+        """
+        To get the position, fitness wrapper, target and obj list
+            + A[self.ID_POS]                  --> Return: position
+            + A[self.ID_TAR]                  --> Return: [target, [obj1, obj2, ...]]
+            + A[self.ID_TAR][self.ID_FIT]     --> Return: target
+            + A[self.ID_TAR][self.ID_OBJ]     --> Return: [obj1, obj2, ...]
+
+        Returns:
+            list: wrapper of solution with format [position, target, hunger]
+        """
+        position = np.random.uniform(lb, ub)
+        position = self.amend_position(position, lb, ub)
+        target = self.get_target_wrapper(position)
+        hunger = 1.0
+        return [position, target, hunger]
 
     def sech(self, x):
-        return 2 / (exp(x) + exp(-x))
+        if np.abs(x) > 50:
+            return 0.5
+        return 2 / (np.exp(x) + np.exp(-x))
 
-    def train(self):
-        # Hungry value of all solutions
-        hunger_list = ones(self.pop_size)
+    def update_hunger_value(self, pop=None, g_best=None, g_worst=None):
+        # min_index = pop.index(min(pop, key=lambda x: x[self.ID_TAR][self.ID_FIT]))
+        # Eq (2.8) and (2.9)
+        for i in range(0, self.pop_size):
+            r = np.random.rand()
+            # space: since we pass lower bound and upper bound as list. Better take the np.mean of them.
+            space = np.mean(self.problem.ub - self.problem.lb)
+            H = (pop[i][self.ID_TAR][self.ID_FIT] - g_best[self.ID_TAR][self.ID_FIT]) / \
+                (g_worst[self.ID_TAR][self.ID_FIT] - g_best[self.ID_TAR][self.ID_FIT] + self.EPSILON) * r * 2 * space
+            if H < self.LH:
+                H = self.LH * (1 + r)
+            pop[i][self.ID_HUN] += H
 
-        # Create population
-        pop = [self.create_solution() for _ in range(self.pop_size)]
+            if g_best[self.ID_TAR][self.ID_FIT] == pop[i][self.ID_TAR][self.ID_FIT]:
+                pop[i][self.ID_HUN] = 0
+        return pop
 
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
+
+        Args:
+            epoch (int): The current iteration
+        """
         ## Eq. (2.2)
         ### Find the current best and current worst
-        g_best, g_worst = self.get_global_best_global_worst_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
+        _, best, worst = self.get_special_solutions(self.pop, best=1, worst=1)
+        g_best, g_worst = best[0], worst[0]
+        pop = self.update_hunger_value(self.pop, g_best, g_worst)
 
-        hunger_list = self.get_hunger_list(pop, hunger_list, g_best, g_worst)
+        ## Eq. (2.4)
+        shrink = 2 * (1 - (epoch + 1) / self.epoch)
+        total_hunger = np.sum([pop[idx][self.ID_HUN] for idx in range(0, self.pop_size)])
 
-        # Loop
-        for epoch in range(self.epoch):
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            current_agent = deepcopy(self.pop[idx])
+            #### Variation control
+            E = self.sech(current_agent[self.ID_TAR][self.ID_FIT] - g_best[self.ID_TAR][self.ID_FIT])
 
-            ## Eq. (2.4)
-            shrink = 2 * (1 - (epoch + 1) / self.epoch)
+            # R is a ranging controller added to limit the range of activity, in which the range of R is gradually reduced to 0
+            R = 2 * shrink * np.random.rand() - shrink  # Eq. (2.3)
 
-            for i in range(0, self.pop_size):
-                #### Variation control
-                E = self.sech(pop[i][self.ID_FIT] - g_best[self.ID_FIT])
+            ## Calculate the hungry weight of each position
+            if np.random.rand() < self.PUP:
+                W1 = current_agent[self.ID_HUN] * self.pop_size / (total_hunger + self.EPSILON) * np.random.rand()
+            else:
+                W1 = 1
+            W2 = (1 - np.exp(-abs(current_agent[self.ID_HUN] - total_hunger))) * np.random.rand() * 2
 
-                # R is a ranging controller added to limit the range of activity, in which the range of R is gradually reduced to 0
-                R = 2 * shrink * rand() - shrink  # Eq. (2.3)
-
-                ## Calculate the hungry weight of each position
-                if rand() < self.L:
-                    W1 = hunger_list[i] * self.pop_size / (sum(hunger_list) + self.EPSILON) * rand()
+            ### Udpate position of individual Eq. (2.1)
+            r1 = np.random.rand()
+            r2 = np.random.rand()
+            if r1 < self.PUP:
+                pos_new = current_agent[self.ID_POS] * (1 + np.random.normal(0, 1))
+            else:
+                if r2 > E:
+                    pos_new = W1 * g_best[self.ID_POS] + R * W2 * abs(g_best[self.ID_POS] - current_agent[self.ID_POS])
                 else:
-                    W1 = 1
-                W2 = (1 - exp(-abs(hunger_list[i] - sum(hunger_list)))) * rand() * 2
-
-                ### Udpate position of individual Eq. (2.1)
-                r1 = rand()
-                r2 = rand()
-                if r1 < self.L:
-                    pos_new = pop[i][self.ID_POS] * (1 + normal(0, 1))
-                else:
-                    if r2 > E:
-                        pos_new = W1 * g_best[self.ID_POS] + R * W2 * abs(g_best[self.ID_POS] - pop[i][self.ID_POS])
-                    else:
-                        pos_new = W1 * g_best[self.ID_POS] - R * W2 * abs(g_best[self.ID_POS] - pop[i][self.ID_POS])
-                fit_new = self.get_fitness_position(pos_new)
-                pop[i] = [pos_new, fit_new]
-
-            ## Update global best and global worst
-            g_best, g_worst = self.update_global_best_global_worst_solution(pop, self.ID_MIN_PROB, self.ID_MAX_PROB, g_best)
-
-            ## Update hunger list
-            hunger_list = self.get_hunger_list(pop, hunger_list, g_best, g_worst)
-
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
+                    pos_new = W1 * g_best[self.ID_POS] - R * W2 * abs(g_best[self.ID_POS] - current_agent[self.ID_POS])
+            current_agent[self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append(current_agent)
+        self.pop = self.update_target_wrapper_population(pop_new)

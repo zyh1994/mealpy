@@ -1,151 +1,238 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu" at 09:17, 09/11/2020                                                               %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Nguyen_Thieu2                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-# ------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 09:17, 09/11/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import uniform
-from numpy import ceil, log10, round, reshape, array, argmin, nonzero, std, clip, maximum, minimum, mean
+import numpy as np
 from scipy.spatial.distance import cdist
 from copy import deepcopy
-from mealpy.optimizer import Root
+from mealpy.optimizer import Optimizer
 
 
-class BaseBRO(Root):
+class BaseBRO(Optimizer):
     """
-        My best version of: Battle Royale Optimization (BRO)
-            (Battle royale optimization algorithm)
-        Link:
-            https://doi.org/10.1007/s00521-020-05004-4
+    My changed version of: Battle Royale Optimization (BRO)
+
+    Notes
+    ~~~~~
+    I change the flow of algorithm
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + threshold (int): [2, 5], dead threshold, default=3
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.human_based.BRO import BaseBRO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> threshold = 3
+    >>> model = BaseBRO(problem_dict1, epoch, pop_size, threshold)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
+
     ID_DAM = 2
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, threshold=3, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.threshold = threshold
+    def __init__(self, problem, epoch=10000, pop_size=100, threshold=3, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            threshold (int): dead threshold, default=3
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.threshold = self.validator.check_float("threshold", threshold, [1, 10])
 
-    def create_solution(self, minmax=0):
-        position = uniform(self.lb, self.ub)
-        fitness = self.get_fitness_position(position=position, minmax=minmax)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+        ## Dynamic variable
+        shrink = np.ceil(np.log10(self.epoch))
+        self.dyn_delta = round(self.epoch / shrink)
+        self.problem.lb_updated = deepcopy(self.problem.lb)
+        self.problem.ub_updated = deepcopy(self.problem.ub)
+
+    def create_solution(self, lb=None, ub=None):
+        """
+        To get the position, fitness wrapper, target and obj list
+            + A[self.ID_POS]                  --> Return: position
+            + A[self.ID_TAR]                  --> Return: [target, [obj1, obj2, ...]]
+            + A[self.ID_TAR][self.ID_FIT]     --> Return: target
+            + A[self.ID_TAR][self.ID_OBJ]     --> Return: [obj1, obj2, ...]
+
+        Returns:
+            list: wrapper of solution with format [position, target, damage]
+        """
+        position = self.generate_position(lb, ub)
+        position = self.amend_position(position, lb, ub)
+        target = self.get_target_wrapper(position)
         damage = 0
-        return [position, fitness, damage]
+        return [position, target, damage]
 
-    def find_argmin_distance(self, target_pos=None, pop=None):
-        list_pos = array([pop[idx][self.ID_POS] for idx in range(0, self.pop_size)])
-        target_pos = reshape(target_pos, (1, -1))
+    def __get_min_idx(self, data):
+        k_zero = np.count_nonzero(data == 0)
+        if k_zero == len(data):
+            return np.random.choice(range(0, k_zero))
+        ## 1st: Partition sorting, not good solution here.
+        # return np.argpartition(data, k_zero)[k_zero]
+        ## 2nd: Faster
+        return np.where(data == np.min(data[data != 0]))[0][0]
+
+    def find_idx_min_distance(self, target_pos=None, pop=None):
+        list_pos = np.array([pop[idx][self.ID_POS] for idx in range(0, self.pop_size)])
+        target_pos = np.reshape(target_pos, (1, -1))
         dist_list = cdist(list_pos, target_pos, 'euclidean')
-        dist_list = reshape(dist_list, (-1))
-        idx = argmin(dist_list[nonzero(dist_list)])
-        return idx
+        dist_list = np.reshape(dist_list, (-1))
+        return self.__get_min_idx(dist_list)
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop=pop, id_fit=self.ID_FIT, id_best=self.ID_MIN_PROB)
-        shrink = ceil(log10(self.epoch))
-        delta = round(self.epoch / shrink)
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-        for epoch in range(self.epoch):
-            for i in range(self.pop_size):
-                # Compare ith soldier with nearest one (jth)
-                j = self.find_argmin_distance(pop[i][self.ID_POS], pop)
-                if pop[i][self.ID_FIT] < pop[j][self.ID_FIT]:
-                    ## Update Winner based on global best solution
-                    pos_new = pop[i][self.ID_POS] + uniform() * mean(array([pop[i][self.ID_POS], g_best[self.ID_POS]]), axis=0)
-                    fit_new = self.get_fitness_position(pos_new)
-                    dam_new = pop[i][self.ID_DAM] - 1  ## Substract damaged hurt -1 to go next battle
-                    pop[i] = [pos_new, fit_new, dam_new]
+        Args:
+            epoch (int): The current iteration
+        """
+        nfe_epoch = 0
+        for i in range(self.pop_size):
+            # Compare ith soldier with nearest one (jth)
+            j = self.find_idx_min_distance(self.pop[i][self.ID_POS], self.pop)
+            if self.compare_agent(self.pop[i], self.pop[j]):
+                ## Update Winner based on global best solution
+                pos_new = self.pop[i][self.ID_POS] + np.random.uniform() * \
+                          np.mean(np.array([self.pop[i][self.ID_POS], self.g_best[self.ID_POS]]), axis=0)
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                target = self.get_target_wrapper(pos_new)
+                dam_new = self.pop[i][self.ID_DAM] - 1  ## Substract damaged hurt -1 to go next battle
+                self.pop[i] = [pos_new, target, dam_new]
+                ## Update Loser
+                if self.pop[j][self.ID_DAM] < self.threshold:  ## If loser not dead yet, move it based on general
+                    pos_new = np.random.uniform() * (np.maximum(self.pop[j][self.ID_POS], self.g_best[self.ID_POS]) -
+                                                     np.minimum(self.pop[j][self.ID_POS], self.g_best[self.ID_POS])) + \
+                              np.maximum(self.pop[j][self.ID_POS], self.g_best[self.ID_POS])
+                    dam_new = self.pop[j][self.ID_DAM] + 1
 
-                    ## Update Loser
-                    if pop[j][self.ID_DAM] < self.threshold:  ## If loser not dead yet, move it based on general
-                        pop[j][self.ID_POS] = uniform() * (maximum(pop[j][self.ID_POS], g_best[self.ID_POS]) -
-                                                           minimum(pop[j][self.ID_POS], g_best[self.ID_POS])) + \
-                                              maximum(pop[j][self.ID_POS], g_best[self.ID_POS])
-                        pop[j][self.ID_DAM] += 1
-                        pop[j][self.ID_FIT] = self.get_fitness_position(pop[j][self.ID_POS])
-                    else:  ## Loser dead and respawn again
-                        pop[j] = self.create_solution()
-                else:
-                    ## Update Loser by following position of Winner
-                    pop[i] = deepcopy(pop[j])
-
-                    ## Update Winner by following position of General to protect the King and General
-                    pos_new = pop[j][self.ID_POS] + uniform() * (g_best[self.ID_POS] - pop[j][self.ID_POS])
-                    fit_new = self.get_fitness_position(pos_new)
+                    self.pop[j][self.ID_TAR] = self.get_target_wrapper(self.pop[j][self.ID_POS])
+                else:  ## Loser dead and respawn again
+                    pos_new = self.generate_position(self.problem.lb_updated, self.problem.ub_updated)
                     dam_new = 0
-                    pop[j] = [pos_new, fit_new, dam_new]
-
-            if epoch >= delta:  # max_epoch = 1000 -> delta = 300, 450, >500,....
-                pos_list = array([pop[idx][self.ID_POS] for idx in range(0, self.pop_size)])
-                pos_std = std(pos_list, axis=0)
-                lb = g_best[self.ID_POS] - pos_std
-                ub = g_best[self.ID_POS] + pos_std
-                self.lb = clip(lb, self.lb, self.ub)
-                self.ub = clip(ub, self.lb, self.ub)
-                delta += round(delta / 2)
-
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                target = self.get_target_wrapper(pos_new)
+                self.pop[j] = [pos_new, target, dam_new]
+                nfe_epoch += 2
+            else:
+                ## Update Loser by following position of Winner
+                self.pop[i] = deepcopy(self.pop[j])
+                ## Update Winner by following position of General to protect the King and General
+                pos_new = self.pop[j][self.ID_POS] + np.random.uniform() * (self.g_best[self.ID_POS] - self.pop[j][self.ID_POS])
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                target = self.get_target_wrapper(pos_new)
+                dam_new = 0
+                self.pop[j] = [pos_new, target, dam_new]
+                nfe_epoch += 1
+        self.nfe_per_epoch = nfe_epoch
+        if epoch >= self.dyn_delta:  # max_epoch = 1000 -> delta = 300, 450, >500,....
+            pos_list = np.array([self.pop[idx][self.ID_POS] for idx in range(0, self.pop_size)])
+            pos_std = np.std(pos_list, axis=0)
+            lb = self.g_best[self.ID_POS] - pos_std
+            ub = self.g_best[self.ID_POS] + pos_std
+            self.problem.lb_updated = np.clip(lb, self.problem.lb_updated, self.problem.ub_updated)
+            self.problem.ub_updated = np.clip(ub, self.problem.lb_updated, self.problem.ub_updated)
+            self.dyn_delta += np.round(self.dyn_delta / 2)
 
 
 class OriginalBRO(BaseBRO):
     """
-        The original version of: Battle royale optimization (BRO)
-            (Battle royale optimization algorithm)
-        Link:
-            https://doi.org/10.1007/s00521-020-05004-4
-        - Original category: Human-based
+    The original version of: Battle Royale Optimization (BRO)
+
+    Links:
+        1. https://doi.org/10.1007/s00521-020-05004-4
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + threshold (int): [2, 5], dead threshold, default=3
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.human_based.BRO import BaseBRO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> threshold = 3
+    >>> model = BaseBRO(problem_dict1, epoch, pop_size, threshold)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Rahkar Farshi, T., 2021. Battle royale optimization algorithm. Neural Computing and Applications, 33(4), pp.1139-1157.
     """
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, threshold=3, **kwargs):
-        BaseBRO.__init__(self, obj_func, lb, ub, verbose, epoch, pop_size, threshold, kwargs=kwargs)
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop=pop, id_fit=self.ID_FIT, id_best=self.ID_MIN_PROB)
-        shrink = ceil(log10(self.epoch))
-        delta = round(self.epoch / shrink)
+    def __init__(self, problem, epoch=10000, pop_size=100, threshold=3, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            threshold (int): dead threshold, default=3
+        """
+        super().__init__(problem, epoch, pop_size, threshold, **kwargs)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-        for epoch in range(self.epoch):
-            for i in range(self.pop_size):
-                # Compare ith soldier with nearest one (jth)
-                j = self.find_argmin_distance(pop[i][self.ID_POS], pop)
-                dam, vic = i, j             ## This error in the algorithm's flow in the paper, But in the matlab code, he changed.
-                if pop[i][self.ID_FIT] < pop[j][self.ID_FIT]:
-                    dam, vic = j, i         ## The mistake also here in the paper.
-                if pop[dam][self.ID_DAM] < self.threshold:
-                    for d in range(0, self.problem_size):
-                        pop[dam][self.ID_POS][d] = uniform()*(max(pop[dam][self.ID_POS][d], g_best[self.ID_POS][d]) -
-                                                 min(pop[dam][self.ID_POS][d], g_best[self.ID_POS][d])) + \
-                                      max(pop[dam][self.ID_POS][d], g_best[self.ID_POS][d])
-                    pop[dam][self.ID_DAM] += 1
-                    pop[vic][self.ID_DAM] = 0
-                else:
-                    for d in range(0, self.problem_size):
-                        pop[dam][self.ID_POS][d] = uniform() * (self.ub[d] - self.lb[d]) + self.lb[d]
-                    fit_dam = self.get_fitness_position(pop[dam][self.ID_POS])
-                    pop[dam][self.ID_FIT] = fit_dam
-                    pop[dam][self.ID_DAM] = 0
-            if epoch >= delta:
-                pos_list = array([pop[idx][self.ID_POS] for idx in range(0, self.pop_size)])
-                pos_std = std(pos_list, axis=0)
-                lb = g_best[self.ID_POS] - pos_std
-                ub = g_best[self.ID_POS] + pos_std
-                self.lb = clip(lb, self.lb, self.ub)
-                self.ub = clip(ub, self.lb, self.ub)
-                delta += round(delta/2)
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
+        Args:
+            epoch (int): The current iteration
+        """
+        for i in range(self.pop_size):
+            # Compare ith soldier with nearest one (jth)
+            j = self.find_idx_min_distance(self.pop[i][self.ID_POS], self.pop)
+            dam, vic = i, j  ## This error in the algorithm's flow in the paper, But in the matlab code, he changed.
+            if self.compare_agent(self.pop[i], self.pop[j]):
+                dam, vic = j, i  ## The mistake also here in the paper.
+            if self.pop[dam][self.ID_DAM] < self.threshold:
+                pos_new = np.random.uniform(0, 1, self.problem.n_dims) * \
+                          (np.maximum(self.pop[dam][self.ID_POS], self.g_best[self.ID_POS]) -
+                           np.minimum(self.pop[dam][self.ID_POS], self.g_best[self.ID_POS])) + \
+                          np.maximum(self.pop[dam][self.ID_POS], self.g_best[self.ID_POS])
+                self.pop[dam][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                self.pop[dam][self.ID_TAR] = self.get_target_wrapper(self.pop[dam][self.ID_POS])
+                self.pop[dam][self.ID_DAM] += 1
+                self.pop[vic][self.ID_DAM] = 0
+            else:
+                self.pop[dam] = self.create_solution(self.problem.lb_updated, self.problem.ub_updated)
+        if epoch >= self.dyn_delta:
+            pos_list = np.array([self.pop[idx][self.ID_POS] for idx in range(0, self.pop_size)])
+            pos_std = np.std(pos_list, axis=0)
+            lb = self.g_best[self.ID_POS] - pos_std
+            ub = self.g_best[self.ID_POS] + pos_std
+            self.problem.lb_updated = np.clip(lb, self.problem.lb_updated, self.problem.ub_updated)
+            self.problem.ub_updated = np.clip(ub, self.problem.lb_updated, self.problem.ub_updated)
+            self.dyn_delta += round(self.dyn_delta / 2)

@@ -1,74 +1,111 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 21:18, 17/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 21:18, 17/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import uniform, randint
-from numpy import ones, clip
-from mealpy.optimizer import Root
+import numpy as np
+from mealpy.optimizer import Optimizer
 
 
-class BaseWDO(Root):
+class BaseWDO(Optimizer):
     """
-    The original version of : Wind Driven Optimization (WDO)
-        The Wind Driven Optimization Technique and its Application in Electromagnetics
-    Link:
-        https://ieeexplore.ieee.org/abstract/document/6407788
+    The original version of: Wind Driven Optimization (WDO)
+
+    Links:
+        1. https://ieeexplore.ieee.org/abstract/document/6407788
+
+    Notes
+    ~~~~~
+    + pop is the set of "air parcel" - "position"
+    + air parcel: is the set of gas atoms. Each atom represents a dimension in position and has its own velocity
+    + pressure represented by fitness value
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + RT (int): [2, 3, 4], RT coefficient, default = 3
+        + g_c (float): [0.1, 0.5], gravitational constant, default = 0.2
+        + alp (float): [0.3, 0.8], constants in the update equation, default=0.4
+        + c_e (float): [0.1, 0.9], coriolis effect, default=0.4
+        + max_v (float): [0.1, 0.9], maximum allowed speed, default=0.3
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.physics_based.WDO import BaseWDO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>>     "log_to": None,
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> RT = 3
+    >>> g_c = 0.2
+    >>> alp = 0.4
+    >>> c_e = 0.4
+    >>> max_v = 0.3
+    >>> model = BaseWDO(problem_dict1, epoch, pop_size, RT, g_c, alp, c_e, max_v)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Bayraktar, Z., Komurcu, M., Bossard, J.A. and Werner, D.H., 2013. The wind driven optimization
+    technique and its application in electromagnetics. IEEE transactions on antennas and
+    propagation, 61(5), pp.2745-2757.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 RT=3, g=0.2, alp=0.4, c=0.4, max_v=0.3, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.RT = RT                # RT coefficient
-        self.g = g                  # gravitational constant
-        self.alp = alp              # constants in the update equation
-        self.c = c                  # coriolis effect
-        self.max_v = max_v          # maximum allowed speed
-
-    def train(self):
+    def __init__(self, problem, epoch=10000, pop_size=100, RT=3, g_c=0.2, alp=0.4, c_e=0.4, max_v=0.3, **kwargs):
         """
-        # pop is the set of "air parcel" - "position"
-        # air parcel: is the set of gas atoms . Each atom represents a dimension in position and has its own velocity
-        # pressure represented by fitness value
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            RT (int): RT coefficient, default = 3
+            g_c (float): gravitational constant, default = 0.2
+            alp (float): constants in the update equation, default=0.4
+            c_e (float): coriolis effect, default=0.4
+            max_v (float): maximum allowed speed, default=0.3
         """
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-        list_velocity = self.max_v * uniform(self.lb, self.ub, (self.pop_size, self.problem_size))
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.RT = self.validator.check_int("RT", RT, [1, 4])
+        self.g_c = self.validator.check_float("g_c", g_c, (0, 1.0))
+        self.alp = self.validator.check_float("alp", alp, (0, 1.0))
+        self.c_e = self.validator.check_float("c_e", c_e, (0, 1.0))
+        self.max_v = self.validator.check_float("max_v", max_v, (0, 1.0))
 
-        for epoch in range(self.epoch):
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+        ## Dynamic variable
+        self.dyn_list_velocity = self.max_v * np.random.uniform(self.problem.lb, self.problem.ub, (self.pop_size, self.problem.n_dims))
 
-            # Update velocity based on random dimensions and position of global best
-            for i in range(self.pop_size):
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-                rand_dim = randint(0, self.problem_size)
-                temp = list_velocity[i][rand_dim] * ones(self.problem_size)
-                vel = (1 - self.alp)*list_velocity[i] - self.g * pop[i][self.ID_POS] + \
-                      (1 - 1.0/(i+1)) * self.RT * (g_best[self.ID_POS] - pop[i][self.ID_POS]) + self.c * temp / (i+1)
-                vel = clip(vel, -self.max_v, self.max_v)
+        Args:
+            epoch (int): The current iteration
+        """
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            rand_dim = np.random.randint(0, self.problem.n_dims)
+            temp = self.dyn_list_velocity[idx][rand_dim] * np.ones(self.problem.n_dims)
+            vel = (1 - self.alp) * self.dyn_list_velocity[idx] - self.g_c * self.pop[idx][self.ID_POS] + \
+                  (1 - 1.0 / (idx + 1)) * self.RT * (self.g_best[self.ID_POS] - self.pop[idx][self.ID_POS]) + self.c_e * temp / (idx + 1)
+            vel = np.clip(vel, -self.max_v, self.max_v)
 
-                # Update air parcel positions, check the bound and calculate pressure (fitness)
-                pos = pop[i][self.ID_POS] + vel
-                pos = self.amend_position_faster(pos)
-                fit = self.get_fitness_position(pos)
-                pop[i] = [pos, fit]
-                list_velocity[i] = vel
-
-                ## batch size idea
-                if self.batch_idea:
-                    if (i + 1) % self.batch_size == 0:
-                        g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-                else:
-                    if (i + 1) % self.pop_size == 0:
-                        g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print(">Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
+            # Update air parcel positions, check the bound and calculate pressure (fitness)
+            self.dyn_list_velocity[idx] = vel
+            pos = self.pop[idx][self.ID_POS] + vel
+            pos_new = self.amend_position(pos, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        self.pop = self.update_target_wrapper_population(pop_new)

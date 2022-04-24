@@ -1,121 +1,183 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 07:03, 18/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 07:03, 18/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy import exp, sin, pi, mean, zeros
-from numpy.random import uniform, randint
-from numpy.linalg import norm
+import numpy as np
 from copy import deepcopy
-from mealpy.optimizer import Root
+from mealpy.optimizer import Optimizer
 
 
-class BaseASO(Root):
+class BaseASO(Optimizer):
     """
-        The original version of: Atom Search Optimization (ASO)
-            https://doi.org/10.1016/j.knosys.2018.08.030
-            https://www.mathworks.com/matlabcentral/fileexchange/67011-atom-search-optimization-aso-algorithm
+    The original version of: Atom Search Optimization (ASO)
+
+    Links:
+        1. https://doi.org/10.1016/j.knosys.2018.08.030
+        2. https://www.mathworks.com/matlabcentral/fileexchange/67011-atom-search-optimization-aso-algorithm
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + alpha (int): Depth weight, default = 50
+        + beta (float): Multiplier weight, default = 0.2
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.physics_based.ASO import BaseASO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> alpha = 50
+    >>> beta = 0.2
+    >>> model = BaseASO(problem_dict1, epoch, pop_size, alpha, beta)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Zhao, W., Wang, L. and Zhang, Z., 2019. Atom search optimization and its application to solve a
+    hydrogeologic parameter estimation problem. Knowledge-Based Systems, 163, pp.283-304.
     """
+
     ID_POS = 0
-    ID_FIT = 1
-    ID_VEL = 2      # Velocity
-    ID_M = 3        # Mass of atom
+    ID_TAR = 1
+    ID_VEL = 2  # Velocity
+    ID_MAS = 3  # Mass of atom
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, alpha=50, beta=0.2, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.alpha = alpha                  # Depth weight
-        self.beta = beta                    # Multiplier weight
+    def __init__(self, problem, epoch=10000, pop_size=100, alpha=50, beta=0.2, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            alpha (int): [10, 100], Depth weight, default = 50
+            beta (float): [0.1, 1.0], Multiplier weight, default = 0.2
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.alpha = self.validator.check_int("alpha", alpha, [1, 100])
+        self.beta = self.validator.check_float("beta", beta, (0, 1.0))
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-    def create_solution(self, minmax=0):
-        pos = uniform(self.lb, self.ub)
-        fitness = self.get_fitness_position(position=pos)
-        velocity = uniform(self.lb, self.ub)
+    def create_solution(self, lb=None, ub=None):
+        """
+        To get the position, fitness wrapper, target and obj list
+            + A[self.ID_POS]                  --> Return: position
+            + A[self.ID_TAR]                  --> Return: [target, [obj1, obj2, ...]]
+            + A[self.ID_TAR][self.ID_FIT]     --> Return: target
+            + A[self.ID_TAR][self.ID_OBJ]     --> Return: [obj1, obj2, ...]
+
+        Returns:
+            list: wrapper of solution with format [position, target, velocity, mass]
+        """
+        position = np.random.uniform(lb, ub)
+        position = self.amend_position(position, lb, ub)
+        target = self.get_target_wrapper(position)
+        velocity = np.random.uniform(lb, ub)
         mass = 0.0
-        return [pos, fitness, velocity, mass]
+        return [position, target, velocity, mass]
+
+    def amend_position(self, position=None, lb=None, ub=None):
+        """
+        Depend on what kind of problem are we trying to solve, there will be an different amend_position
+        function to rebound the position of agent into the valid range.
+
+        Args:
+            position: vector position (location) of the solution.
+            lb: list of lower bound values
+            ub: list of upper bound values
+
+        Returns:
+            Amended position (make the position is in bound)
+        """
+        return np.where(np.logical_and(lb <= position, position <= ub), position, np.random.uniform(lb, ub))
 
     def _update_mass__(self, population):
-        pop = sorted(population, key=lambda item: item[self.ID_FIT])
-        best_fit = pop[0][self.ID_FIT]
-        worst_fit = pop[-1][self.ID_FIT]
-        sum_fit = sum([item[self.ID_FIT] for item in pop])
-        for it in population:
-            it[self.ID_M] = exp( (it[self.ID_FIT] - best_fit)/(worst_fit - best_fit + self.EPSILON) ) / sum_fit
+        fit_total, fit_best, fit_worst = self.get_special_fitness(population)
+        for agent in population:
+            agent[self.ID_MAS] = np.exp((agent[self.ID_TAR][self.ID_FIT] - fit_best) / (fit_worst - fit_best + self.EPSILON)) / fit_total
         return population
 
     def _find_LJ_potential__(self, iteration, average_dist, radius):
         c = (1 - iteration / self.epoch) ** 3
         # g0 = 1.1, u = 2.4
-        rsmin = 1.1 + 0.1 * sin((iteration+1) / self.epoch * pi / 2)
+        rsmin = 1.1 + 0.1 * np.sin((iteration + 1) / self.epoch * np.pi / 2)
         rsmax = 1.24
-        if radius/average_dist < rsmin:
+        if radius / average_dist < rsmin:
             rs = rsmin
         else:
-            if radius/average_dist > rsmax:
+            if radius / average_dist > rsmax:
                 rs = rsmax
             else:
                 rs = radius / average_dist
-        potential = c * (12 * (-rs)**(-13) - 6 * (-rs)**(-7))
+        potential = c * (12 * (-rs) ** (-13) - 6 * (-rs) ** (-7))
         return potential
 
     def _acceleration__(self, population, g_best, iteration):
-        eps = 2**(-52)
+        eps = 2 ** (-52)
         pop = self._update_mass__(population)
 
-        G = exp(-20.0 * (iteration+1) / self.epoch)
+        G = np.exp(-20.0 * (iteration + 1) / self.epoch)
         k_best = int(self.pop_size - (self.pop_size - 2) * ((iteration + 1) / self.epoch) ** 0.5) + 1
-        k_best_pop = deepcopy(sorted(pop, key=lambda it: it[self.ID_M], reverse=True)[:k_best])
-        mk_average = mean([item[self.ID_POS] for item in k_best_pop])
+        if self.problem.minmax == "min":
+            k_best_pop = deepcopy(sorted(pop, key=lambda agent: agent[self.ID_MAS], reverse=True)[:k_best])
+        else:
+            k_best_pop = deepcopy(sorted(pop, key=lambda agent: agent[self.ID_MAS])[:k_best])
+        mk_average = np.mean([item[self.ID_POS] for item in k_best_pop])
 
-        acc_list = zeros((self.pop_size, self.problem_size))
+        acc_list = np.zeros((self.pop_size, self.problem.n_dims))
         for i in range(0, self.pop_size):
-            dist_average = norm(pop[i][self.ID_POS] - mk_average)
-            temp = zeros((self.problem_size))
+            dist_average = np.linalg.norm(pop[i][self.ID_POS] - mk_average)
+            temp = np.zeros((self.problem.n_dims))
 
             for atom in k_best_pop:
                 # calculate LJ-potential
-                radius = norm(pop[i][self.ID_POS]-atom[self.ID_POS])
+                radius = np.linalg.norm(pop[i][self.ID_POS] - atom[self.ID_POS])
                 potential = self._find_LJ_potential__(iteration, dist_average, radius)
-                temp += potential * uniform(0, 1, self.problem_size) * ((atom[self.ID_POS]-pop[i][self.ID_POS])/(radius + eps))
+                temp += potential * np.random.uniform(0, 1, self.problem.n_dims) * ((atom[self.ID_POS] - pop[i][self.ID_POS]) / (radius + eps))
             temp = self.alpha * temp + self.beta * (g_best[self.ID_POS] - pop[i][self.ID_POS])
             # calculate acceleration
-            acc = G * temp / pop[i][self.ID_M]
+            acc = G * temp / pop[i][self.ID_MAS]
             acc_list[i] = acc
         return acc_list
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
+        Args:
+            epoch (int): The current iteration
+        """
         # Calculate acceleration.
-        atom_acc_list = self._acceleration__(pop, g_best, iteration=0)
+        atom_acc_list = self._acceleration__(self.pop, self.g_best, iteration=epoch)
 
-        for epoch in range(0, self.epoch):
-            # Update velocity based on random dimensions and position of global best
-            for i in range(0, self.pop_size):
-                velocity_rand = uniform(self.lb, self.ub)
-                velocity = velocity_rand * pop[i][self.ID_VEL] + atom_acc_list[i]
-                temp = pop[i][self.ID_POS] + velocity
-                # Relocate atom out of range
-                temp = self.amend_position_random(temp)
-                fit = self.get_fitness_position(temp)
-                if fit < pop[i][self.ID_FIT]:
-                    pop[i] = [temp, fit, pop[i][self.ID_VEL], 0.0]
+        # Update velocity based on random dimensions and position of global best
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            agent = deepcopy(self.pop[idx])
+            velocity_rand = np.random.uniform(self.problem.lb, self.problem.ub)
+            velocity = velocity_rand * self.pop[idx][self.ID_VEL] + atom_acc_list[idx]
+            pos_new = self.pop[idx][self.ID_POS] + velocity
+            # Relocate atom out of range
+            agent[self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop_new.append(agent)
+        pop_new = self.update_target_wrapper_population(pop_new)
+        pop_new = self.greedy_selection_population(self.pop, pop_new)
 
-            current_best = self.get_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-            if current_best[self.ID_FIT] < g_best[self.ID_FIT]:
-                g_best = deepcopy(current_best)
-            else:
-                pop[randint(0, self.pop_size)] = deepcopy(g_best)
-            atom_acc_list = self._acceleration__(pop, g_best, iteration=epoch+1)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print(">Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
+        _, current_best = self.get_global_best_solution(pop_new)
+        if self.compare_agent(self.g_best, current_best):
+            pop_new[np.random.randint(0, self.pop_size)] = deepcopy(self.g_best)
+        self.pop = pop_new

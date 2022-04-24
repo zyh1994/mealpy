@@ -1,190 +1,206 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 12:01, 17/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 12:01, 17/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy.random import rand
-from numpy import cumsum, array, min, max, reshape
+import numpy as np
 from copy import deepcopy
-from mealpy.optimizer import Root
+from mealpy.optimizer import Optimizer
 
 
-class OriginalALO(Root):
+class OriginalALO(Optimizer):
     """
     The original version of: Ant Lion Optimizer (ALO)
-        (The Ant Lion Optimizer)
-    Link:
-        https://www.mathworks.com/matlabcentral/fileexchange/49920-ant-lion-optimizer-alo
-        http://dx.doi.org/10.1016/j.advengsoft.2015.01.010
+
+    Links:
+        1. https://www.mathworks.com/matlabcentral/fileexchange/49920-ant-lion-optimizer-alo
+        2. https://dx.doi.org/10.1016/j.advengsoft.2015.01.010
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.ALO import OriginalALO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> model = OriginalALO(problem_dict1, epoch, pop_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Mirjalili, S., 2015. The ant lion optimizer. Advances in engineering software, 83, pp.80-98.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
+    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
 
-    def _random_walk_around_antlion__(self, solution, current_epoch):
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = True
+
+    def _random_walk_antlion(self, solution, current_epoch):
         I = 1  # I is the ratio in Equations (2.10) and (2.11)
         if current_epoch > self.epoch / 10:
             I = 1 + 100 * (current_epoch / self.epoch)
-        if current_epoch > self.epoch  / 2:
+        if current_epoch > self.epoch / 2:
             I = 1 + 1000 * (current_epoch / self.epoch)
-        if current_epoch > self.epoch  * (3 / 4):
+        if current_epoch > self.epoch * (3 / 4):
             I = 1 + 10000 * (current_epoch / self.epoch)
-        if current_epoch > self.epoch  * 0.9:
+        if current_epoch > self.epoch * 0.9:
             I = 1 + 100000 * (current_epoch / self.epoch)
-        if current_epoch > self.epoch  * 0.95:
+        if current_epoch > self.epoch * 0.95:
             I = 1 + 1000000 * (current_epoch / self.epoch)
 
-        # Dicrease boundaries to converge towards antlion
-        lb = self.lb / I  # Equation (2.10) in the paper
-        ub = self.ub / I  # Equation (2.10) in the paper
+        # Decrease boundaries to converge towards antlion
+        lb = self.problem.lb / I  # Equation (2.10) in the paper
+        ub = self.problem.ub / I  # Equation (2.10) in the paper
 
         # Move the interval of [lb ub] around the antlion [lb+anlion ub+antlion]
-        if rand() < 0.5:
-            lb = lb + solution # Equation(2.8) in the paper
+        if np.random.rand() < 0.5:
+            lb = lb + solution  # Equation(2.8) in the paper
         else:
             lb = -lb + solution
-        if rand() < 0.5:
+        if np.random.rand() < 0.5:
             ub = ub + solution  # Equation(2.9) in the paper
         else:
             ub = -ub + solution
 
         # This function creates n random walks and normalize according to lb and ub vectors,
         temp = []
-        for k in range(0, self.problem_size):
-            X = cumsum(2 * (rand(self.epoch, 1) > 0.5) - 1)
-            a = min(X)
-            b = max(X)
-            c = lb[k]       # [a b] - -->[c d]
+        for k in range(0, self.problem.n_dims):
+            X = np.cumsum(2 * (np.random.rand(self.epoch, 1) > 0.5) - 1)
+            a = np.min(X)
+            b = np.max(X)
+            c = lb[k]  # [a b] - -->[c d]
             d = ub[k]
-            X_norm = ((X - a)* (d - c)) / (b - a) + c    # Equation(2.7) in the paper
+            X_norm = ((X - a) * (d - c)) / (b - a) + c  # Equation(2.7) in the paper
             temp.append(X_norm)
-        return array(temp)
+        return np.array(temp)
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        pop_new, g_best = self.get_sorted_pop_and_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-        for epoch in range(0, self.epoch):
-            list_fitness = array([item[self.ID_FIT] for item in pop])
-            # This for loop simulate random walks
-            for i in range(0, self.pop_size):
-                # Select ant lions based on their fitness (the better anlion the higher chance of catching ant)
-                rolette_index = self.get_index_roulette_wheel_selection(list_fitness)
+        Args:
+            epoch (int): The current iteration
+        """
+        list_fitness = np.array([item[self.ID_TAR][self.ID_FIT] for item in self.pop])
+        # This for loop simulate random walks
 
-                # RA is the random walk around the selected antlion by rolette wheel
-                RA = self._random_walk_around_antlion__(pop[rolette_index][self.ID_POS], epoch)
+        pop_new = []
+        for idx in range(0, self.pop_size):
+            # Select ant lions based on their fitness (the better anlion the higher chance of catching ant)
+            rolette_index = self.get_index_roulette_wheel_selection(list_fitness)
 
-                # RE is the random walk around the elite (best antlion so far)
-                RE = self._random_walk_around_antlion__(g_best[self.ID_POS], epoch)
+            # RA is the random walk around the selected antlion by rolette wheel
+            RA = self._random_walk_antlion(self.pop[rolette_index][self.ID_POS], epoch)
 
-                temp = (RA[:, epoch] + RE[:, epoch]) / 2        # Equation(2.13) in the paper
-                # Bound checking (bring back the antlions of ants inside search space if they go beyonds the boundaries
-                temp = self.amend_position_faster(temp)
-                fit = self.get_fitness_position(temp)
-                pop_new[i] = [temp, fit]
+            # RE is the random walk around the elite (best antlion so far)
+            RE = self._random_walk_antlion(self.g_best[self.ID_POS], epoch)
 
-            # Update antlion positions and fitnesses based of the ants (if an ant becomes fitter than an antlion we
-            #   assume it was caught by the antlion and the antlion update goes to its position to build the trap)
-            pop = pop + pop_new
-            pop = sorted(pop, key=lambda item: item[self.ID_FIT])
-            pop = pop[:self.pop_size]
+            temp = (RA[:, epoch] + RE[:, epoch]) / 2  # Equation(2.13) in the paper
 
-            # Update the position of elite if any antlinons becomes fitter than it
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
+            # Bound checking (bring back the antlions of ants inside search space if they go beyonds the boundaries
+            pos_new = self.amend_position(temp, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+        pop_new = self.update_target_wrapper_population(pop_new)
 
-            # Keep the elite in the population
-            pop[self.ID_MIN_PROB] = deepcopy(g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        # Update antlion positions and fitnesses based of the ants (if an ant becomes fitter than an antlion we
+        #   assume it was caught by the antlion and the antlion update goes to its position to build the trap)
+        self.pop = self.get_sorted_strim_population(self.pop + pop_new, self.pop_size)
+
+        # Keep the elite in the population
+        self.pop[-1] = deepcopy(self.g_best)
 
 
-class BaseALO(Root):
+class BaseALO(OriginalALO):
     """
-    The is my version of: Ant Lion Optimizer (ALO)
-        (The Ant Lion Optimizer)
-    Link:
-        + Using matrix for better performance.
-        + Change the flow of updating new position. Make it better then original one
+    My changed version of: Ant Lion Optimizer (ALO)
+
+    Notes
+    ~~~~~
+    + Use matrix for better performance.
+    + Change the flow of updating new position makes it better then original one
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.swarm_based.ALO import BaseALO
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> model = BaseALO(problem_dict1, epoch, pop_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
+    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+        """
+        super().__init__(problem, epoch, pop_size, **kwargs)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = True
 
-    def _random_walk_around_antlion__(self, solution, current_epoch):
+    def _random_walk_antlion(self, solution, current_epoch):
         I = 1  # I is the ratio in Equations (2.10) and (2.11)
         if current_epoch > self.epoch / 10:
             I = 1 + 100 * (current_epoch / self.epoch)
-        if current_epoch > self.epoch  / 2:
+        if current_epoch > self.epoch / 2:
             I = 1 + 1000 * (current_epoch / self.epoch)
-        if current_epoch > self.epoch  * (3 / 4):
+        if current_epoch > self.epoch * (3 / 4):
             I = 1 + 10000 * (current_epoch / self.epoch)
-        if current_epoch > self.epoch  * 0.9:
+        if current_epoch > self.epoch * 0.9:
             I = 1 + 100000 * (current_epoch / self.epoch)
-        if current_epoch > self.epoch  * 0.95:
+        if current_epoch > self.epoch * 0.95:
             I = 1 + 1000000 * (current_epoch / self.epoch)
 
         # Dicrease boundaries to converge towards antlion
-        lb = self.lb / I  # Equation (2.10) in the paper
-        ub = self.ub / I  # Equation (2.10) in the paper
+        lb = self.problem.lb / I  # Equation (2.10) in the paper
+        ub = self.problem.ub / I  # Equation (2.10) in the paper
 
         # Move the interval of [lb ub] around the antlion [lb+anlion ub+antlion]. Eq 2.8, 2.9
-        lb = lb + solution if rand() < 0.5 else -lb + solution
-        ub = ub + solution if rand() < 0.5 else -ub + solution
+        lb = lb + solution if np.random.rand() < 0.5 else -lb + solution
+        ub = ub + solution if np.random.rand() < 0.5 else -ub + solution
 
         # This function creates n random walks and normalize according to lb and ub vectors,
         ## Using matrix and vector for better performance
-        X = array([cumsum(2 * (rand(self.epoch, 1) > 0.5) - 1) for _ in range(0, self.problem_size)])
-        a = min(X, axis=1)
-        b = max(X, axis=1)
-        temp1 = reshape((ub - lb) / (b - a), (self.problem_size, 1))
-        temp0 = X - reshape(a, (self.problem_size, 1))
-        X_norm = temp0 * temp1 + reshape(lb, (self.problem_size, 1))
+        X = np.array([np.cumsum(2 * (np.random.rand(self.epoch, 1) > 0.5) - 1) for _ in range(0, self.problem.n_dims)])
+        a = np.min(X, axis=1)
+        b = np.max(X, axis=1)
+        temp1 = np.reshape((ub - lb) / (b - a), (self.problem.n_dims, 1))
+        temp0 = X - np.reshape(a, (self.problem.n_dims, 1))
+        X_norm = temp0 * temp1 + np.reshape(lb, (self.problem.n_dims, 1))
         return X_norm
-
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        pop_new, g_best = self.get_sorted_pop_and_global_best_solution(pop, self.ID_FIT, self.ID_MIN_PROB)
-
-        for epoch in range(0, self.epoch):
-            list_fitness = array([item[self.ID_FIT] for item in pop])
-            # This for loop simulate random walks
-            for i in range(0, self.pop_size):
-                # Select ant lions based on their fitness (the better anlion the higher chance of catching ant)
-                rolette_index = self.get_index_roulette_wheel_selection(list_fitness)
-
-                # RA is the random walk around the selected antlion by rolette wheel
-                RA = self._random_walk_around_antlion__(pop[rolette_index][self.ID_POS], epoch)
-
-                # RE is the random walk around the elite (best antlion so far)
-                RE = self._random_walk_around_antlion__(g_best[self.ID_POS], epoch)
-
-                temp = (RA[:, epoch] + RE[:, epoch]) / 2        # Equation(2.13) in the paper
-                # Bound checking (bring back the antlions of ants inside search space if they go beyonds the boundaries
-                temp = self.amend_position_faster(temp)
-                fit = self.get_fitness_position(temp)
-                if fit < pop[i][self.ID_FIT]:
-                    pop_new[i] = [temp, fit]
-
-            # Change the flow of how position updated
-            pop = deepcopy(pop_new)
-            # Update the position of elite if any antlinons becomes fitter than it
-            pop, g_best = self.update_sorted_population_and_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            # Keep the elite in the population
-            pop[self.ID_MIN_PROB] = deepcopy(g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-

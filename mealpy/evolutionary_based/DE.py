@@ -1,429 +1,484 @@
-#!/usr/bin/env python
-# ------------------------------------------------------------------------------------------------------%
-# Created by "Thieu Nguyen" at 09:48, 16/03/2020                                                        %
-#                                                                                                       %
-#       Email:      nguyenthieu2102@gmail.com                                                           %
-#       Homepage:   https://www.researchgate.net/profile/Thieu_Nguyen6                                  %
-#       Github:     https://github.com/thieu1995                                                        %
-#-------------------------------------------------------------------------------------------------------%
+# !/usr/bin/env python
+# Created by "Thieu" at 09:48, 16/03/2020 ----------%
+#       Email: nguyenthieu2102@gmail.com            %
+#       Github: https://github.com/thieu1995        %
+# --------------------------------------------------%
 
-from numpy import where, sum, any, mean, array, clip, ones, abs
-from numpy.random import uniform, choice, normal, randint, random, rand
-from copy import deepcopy
+import numpy as np
+from mealpy.optimizer import Optimizer
 from scipy.stats import cauchy
-from mealpy.optimizer import Root
-
-"""
-BaseDE: - the very first DE algorithm (Novel mutation strategy for enhancing SHADE and LSHADE algorithms for global numerical optimization)
-    strategy = 0: DE/current-to-rand/1/bin
-             = 1: DE/best/1/bin             
-             = 2: DE/best/2/bin
-             = 3: DE/rand/2/bin
-             = 4: DE/current-to-best/1/bin
-             = 5: DE/current-to-rand/1/bin
-"""
+from copy import deepcopy
 
 
-class BaseDE(Root):
+class BaseDE(Optimizer):
     """
-        The original version of: Differential Evolution (DE)
+    The original version of: Differential Evolution (DE)
+
+    Links:
+        1. https://doi.org/10.1016/j.swevo.2018.10.006
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + wf (float): [0.5, 0.95], weighting factor, default = 0.8
+        + cr (float): [0.5, 0.95], crossover rate, default = 0.9
+        + strategy (int): [0, 5], there are lots of variant version of DE algorithm,
+            + 0: DE/current-to-rand/1/bin
+            + 1: DE/best/1/bin
+            + 2: DE/best/2/bin
+            + 3: DE/rand/2/bin
+            + 4: DE/current-to-best/1/bin
+            + 5: DE/current-to-rand/1/bin
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.evolutionary_based.DE import BaseDE
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> wf = 0.7
+    >>> cr = 0.9
+    >>> strategy = 0
+    >>> model = BaseDE(problem_dict1, epoch, pop_size, wf, cr, strategy)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Mohamed, A.W., Hadi, A.A. and Jambi, K.M., 2019. Novel mutation strategy for enhancing SHADE and
+    LSHADE algorithms for global numerical optimization. Swarm and Evolutionary Computation, 50, p.100455.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 wf=0.8, cr=0.9, strategy=0, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.weighting_factor = wf
-        self.crossover_rate = cr
-        self.strategy = strategy
+    def __init__(self, problem, epoch=10000, pop_size=100, wf=0.8, cr=0.9, strategy=0, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            wf (float): weighting factor, default = 0.8
+            cr (float): crossover rate, default = 0.9
+            strategy (int): Different variants of DE, default = 0
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.wf = self.validator.check_float("wf", wf, (0, 1.0))
+        self.cr = self.validator.check_float("cr", cr, (0, 1.0))
+        self.strategy = self.validator.check_int("strategy", strategy, [0, 5])
+
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+
 
     def _mutation__(self, current_pos, new_pos):
-        pos_new = where(uniform(0, 1, self.problem_size) < self.crossover_rate, current_pos, new_pos)
-        return self.amend_position_faster(pos_new)
+        pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < self.cr, current_pos, new_pos)
+        return self.amend_position(pos_new, self.problem.lb, self.problem.ub)
 
-    def _create_children__(self, pop, g_best):
-        pop_child = deepcopy(pop)
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
+
+        Args:
+            epoch (int): The current iteration
+        """
+        pop = []
         if self.strategy == 0:
-            for i in range(0, self.pop_size):
-                # Choose 3 random element and different to i
-                idx_list = choice(list(set(range(0, self.pop_size)) - {i}), 3, replace=False)
-                pos_new = pop[idx_list[0]][self.ID_POS] + self.weighting_factor * (pop[idx_list[1]][self.ID_POS] - pop[idx_list[2]][self.ID_POS])
-                pos_new = self._mutation__(pop[i][self.ID_POS], pos_new)
-                fit = self.get_fitness_position(pos_new)
-                pop_child[i] = [pos_new, fit]
-            return pop_child
+            # Choose 3 random element and different to i
+            for idx in range(0, self.pop_size):
+                idx_list = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 3, replace=False)
+                pos_new = self.pop[idx_list[0]][self.ID_POS] + self.wf * \
+                          (self.pop[idx_list[1]][self.ID_POS] - self.pop[idx_list[2]][self.ID_POS])
+                pos_new = self._mutation__(self.pop[idx][self.ID_POS], pos_new)
+                pop.append([pos_new, None])
         elif self.strategy == 1:
-            for i in range(0, self.pop_size):
-                idx_list = choice(list(set(range(0, self.pop_size)) - {i}), 2, replace=False)
-                pos_new = g_best[self.ID_POS] + self.weighting_factor * (pop[idx_list[0]][self.ID_POS] - pop[idx_list[1]][self.ID_POS])
-                pos_new = self._mutation__(pop[i][self.ID_POS], pos_new)
-                fit = self.get_fitness_position(pos_new)
-                pop_child[i] = [pos_new, fit]
-            return pop_child
+            for idx in range(0, self.pop_size):
+                idx_list = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 2, replace=False)
+                pos_new = self.g_best[self.ID_POS] + self.wf * (self.pop[idx_list[0]][self.ID_POS] - self.pop[idx_list[1]][self.ID_POS])
+                pos_new = self._mutation__(self.pop[idx][self.ID_POS], pos_new)
+                pop.append([pos_new, None])
         elif self.strategy == 2:
-            for i in range(0, self.pop_size):
-                idx_list = choice(list(set(range(0, self.pop_size)) - {i}), 4, replace=False)
-                pos_new = g_best[self.ID_POS] + self.weighting_factor * (pop[idx_list[0]][self.ID_POS] - pop[idx_list[1]][self.ID_POS]) + \
-                          self.weighting_factor * (pop[idx_list[2]][self.ID_POS] - pop[idx_list[3]][self.ID_POS])
-                pos_new = self._mutation__(pop[i][self.ID_POS], pos_new)
-                fit = self.get_fitness_position(pos_new)
-                pop_child[i] = [pos_new, fit]
-            return pop_child
+            for idx in range(0, self.pop_size):
+                idx_list = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 4, replace=False)
+                pos_new = self.g_best[self.ID_POS] + self.wf * (self.pop[idx_list[0]][self.ID_POS] - self.pop[idx_list[1]][self.ID_POS]) + \
+                          self.wf * (self.pop[idx_list[2]][self.ID_POS] - self.pop[idx_list[3]][self.ID_POS])
+                pos_new = self._mutation__(self.pop[idx][self.ID_POS], pos_new)
+                pop.append([pos_new, None])
         elif self.strategy == 3:
-            for i in range(0, self.pop_size):
-                idx_list = choice(list(set(range(0, self.pop_size)) - {i}), 5, replace=False)
-                pos_new = pop[idx_list[0]][self.ID_POS] + self.weighting_factor * (pop[idx_list[1]][self.ID_POS] - pop[idx_list[2]][self.ID_POS]) + \
-                          self.weighting_factor * (pop[idx_list[3]][self.ID_POS] - pop[idx_list[4]][self.ID_POS])
-                pos_new = self._mutation__(pop[i][self.ID_POS], pos_new)
-                fit = self.get_fitness_position(pos_new)
-                pop_child[i] = [pos_new, fit]
-            return pop_child
+            for idx in range(0, self.pop_size):
+                idx_list = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 5, replace=False)
+                pos_new = self.pop[idx_list[0]][self.ID_POS] + self.wf * \
+                          (self.pop[idx_list[1]][self.ID_POS] - self.pop[idx_list[2]][self.ID_POS]) + \
+                          self.wf * (self.pop[idx_list[3]][self.ID_POS] - self.pop[idx_list[4]][self.ID_POS])
+                pos_new = self._mutation__(self.pop[idx][self.ID_POS], pos_new)
+                pop.append([pos_new, None])
         elif self.strategy == 4:
-            for i in range(0, self.pop_size):
-                idx_list = choice(list(set(range(0, self.pop_size)) - {i}), 2, replace=False)
-                pos_new = pop[i][self.ID_POS] + self.weighting_factor * (g_best[self.ID_POS] - pop[i][self.ID_POS]) + \
-                          self.weighting_factor * (pop[idx_list[0]][self.ID_POS] - pop[idx_list[1]][self.ID_POS])
-                pos_new = self._mutation__(pop[i][self.ID_POS], pos_new)
-                fit = self.get_fitness_position(pos_new)
-                pop_child[i] = [pos_new, fit]
-            return pop_child
-        elif self.strategy == 5:
-            for i in range(0, self.pop_size):
-                idx_list = choice(list(set(range(0, self.pop_size)) - {i}), 3, replace=False)
-                pos_new = pop[i][self.ID_POS] + self.weighting_factor * (pop[idx_list[0]][self.ID_POS] - pop[i][self.ID_POS]) + \
-                          self.weighting_factor * (pop[idx_list[1]][self.ID_POS] - pop[idx_list[2]][self.ID_POS])
-                pos_new = self._mutation__(pop[i][self.ID_POS], pos_new)
-                fit = self.get_fitness_position(pos_new)
-                pop_child[i] = [pos_new, fit]
-            return pop_child
+            for idx in range(0, self.pop_size):
+                idx_list = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 2, replace=False)
+                pos_new = self.pop[idx][self.ID_POS] + self.wf * (self.g_best[self.ID_POS] - self.pop[idx][self.ID_POS]) + \
+                          self.wf * (self.pop[idx_list[0]][self.ID_POS] - self.pop[idx_list[1]][self.ID_POS])
+                pos_new = self._mutation__(self.pop[idx][self.ID_POS], pos_new)
+                pop.append([pos_new, None])
+        else:
+            for idx in range(0, self.pop_size):
+                idx_list = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 3, replace=False)
+                pos_new = self.pop[idx][self.ID_POS] + self.wf * (self.pop[idx_list[0]][self.ID_POS] - self.pop[idx][self.ID_POS]) + \
+                          self.wf * (self.pop[idx_list[1]][self.ID_POS] - self.pop[idx_list[2]][self.ID_POS])
+                pos_new = self._mutation__(self.pop[idx][self.ID_POS], pos_new)
+                pop.append([pos_new, None])
+        pop = self.update_target_wrapper_population(pop)
+
+        # create new pop by comparing fitness of corresponding each member in pop and children
+        self.pop = self.greedy_selection_population(self.pop, pop)
+
+
+class JADE(Optimizer):
+    """
+    The variant version of: Differential Evolution (JADE)
+
+    Links:
+        1. https://doi.org/10.1109/TEVC.2009.2014613
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + miu_f (float): [0.4, 0.6], initial adaptive f, default = 0.5
+        + miu_cr (float): [0.4, 0.6], initial adaptive cr, default = 0.5
+        + pt (float): [0.05, 0.2], The percent of top best agents (p in the paper), default = 0.1
+        + ap (float): [0.05, 0.2], The Adaptation Parameter control value of f and cr (c in the paper), default=0.1
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.evolutionary_based.DE import JADE
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> miu_f = 0.5
+    >>> miu_cr = 0.5
+    >>> pt = 0.1
+    >>> ap = 0.1
+    >>> model = JADE(problem_dict1, epoch, pop_size, miu_f, miu_cr, pt, ap)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Zhang, J. and Sanderson, A.C., 2009. JADE: adaptive differential evolution with optional
+    external archive. IEEE Transactions on evolutionary computation, 13(5), pp.945-958.
+    """
+
+    def __init__(self, problem, epoch=10000, pop_size=100, miu_f=0.5, miu_cr=0.5, pt=0.1, ap=0.1, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            miu_f (float): initial adaptive f, default = 0.5
+            miu_cr (float): initial adaptive cr, default = 0.5
+            pt (float): The percent of top best agents (p in the paper), default = 0.1
+            ap (float): The Adaptation Parameter control value of f and cr (c in the paper), default=0.1
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        # the initial f, location is changed then that f is good
+        self.miu_f = self.validator.check_float("miu_f", miu_f, (0, 1.0))
+        # the initial cr,
+        self.miu_cr = self.validator.check_float("miu_cr", miu_cr, (0, 1.0))
+        # np.random.uniform(0.05, 0.2) # the x_best is select from the top 100p % solutions
+        self.pt = self.validator.check_float("pt", pt, (0, 1.0))
+        # np.random.uniform(1/20, 1/5) # the adaptation parameter control value of f and cr
+        self.ap = self.validator.check_float("ap", ap, (0, 1.0))
+
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+        ## Dynamic variable, changing in run time
+        self.dyn_miu_cr = self.miu_cr
+        self.dyn_miu_f = self.miu_f
+        self.dyn_pop_archive = list()
 
     ### Survivor Selection
-    def _greedy_selection__(self, pop_old=None, pop_new=None):
-        pop = [pop_new[i] if pop_new[i][self.ID_FIT] < pop_old[i][self.ID_FIT] else pop_old[i] for i in range(self.pop_size)]
+    def lehmer_mean(self, list_objects):
+        temp = sum(list_objects)
+        return 0 if temp == 0 else sum(list_objects ** 2) / temp
+
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
+
+        Args:
+            epoch (int): The current iteration
+        """
+        list_f = list()
+        list_cr = list()
+        temp_f = list()
+        temp_cr = list()
+
+        pop_sorted = self.get_sorted_strim_population(self.pop)
+        pop = []
+        for idx in range(0, self.pop_size):
+            ## Calculate adaptive parameter cr and f
+            cr = np.random.normal(self.dyn_miu_cr, 0.1)
+            cr = np.clip(cr, 0, 1)
+            while True:
+                f = cauchy.rvs(self.dyn_miu_f, 0.1)
+                if f < 0:
+                    continue
+                elif f > 1:
+                    f = 1
+                break
+            temp_f.append(f)
+            temp_cr.append(cr)
+            top = int(self.pop_size * self.pt)
+            x_best = pop_sorted[np.random.randint(0, top)]
+            x_r1 = self.pop[np.random.choice(list(set(range(0, self.pop_size)) - {idx}))]
+            new_pop = self.pop + self.dyn_pop_archive
+            while True:
+                x_r2 = new_pop[np.random.randint(0, len(new_pop))]
+                if np.any(x_r2[self.ID_POS] - x_r1[self.ID_POS]) and np.any(x_r2[self.ID_POS] - self.pop[idx][self.ID_POS]):
+                    break
+            x_new = self.pop[idx][self.ID_POS] + f * (x_best[self.ID_POS] - self.pop[idx][self.ID_POS]) + f * (x_r1[self.ID_POS] - x_r2[self.ID_POS])
+            pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < cr, x_new, self.pop[idx][self.ID_POS])
+            j_rand = np.random.randint(0, self.problem.n_dims)
+            pos_new[j_rand] = x_new[j_rand]
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop.append([pos_new, None])
+        pop = self.update_target_wrapper_population(pop)
+
+        for idx in range(0, self.pop_size):
+            if self.compare_agent(pop[idx], self.pop[idx]):
+                self.dyn_pop_archive.append(deepcopy(self.pop[idx]))
+                list_cr.append(temp_cr[idx])
+                list_f.append(temp_f[idx])
+                self.pop[idx] = deepcopy(pop[idx])
+
+        # Randomly remove solution
+        temp = len(self.dyn_pop_archive) - self.pop_size
+        if temp > 0:
+            idx_list = np.random.choice(range(0, len(self.dyn_pop_archive)), temp, replace=False)
+            archive_pop_new = []
+            for idx, solution in enumerate(self.dyn_pop_archive):
+                if idx not in idx_list:
+                    archive_pop_new.append(solution)
+            self.dyn_pop_archive = deepcopy(archive_pop_new)
+
+        # Update miu_cr and miu_f
+        if len(list_cr) == 0:
+            self.dyn_miu_cr = (1 - self.ap) * self.dyn_miu_cr + self.ap * 0.5
+        else:
+            self.dyn_miu_cr = (1 - self.ap) * self.dyn_miu_cr + self.ap * np.mean(np.array(list_cr))
+        if len(list_f) == 0:
+            self.dyn_miu_f = (1 - self.ap) * self.dyn_miu_f + self.ap * 0.5
+        else:
+            self.dyn_miu_f = (1 - self.ap) * self.dyn_miu_f + self.ap * self.lehmer_mean(np.array(list_f))
         return pop
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop=pop, id_fit=self.ID_FIT, id_best=self.ID_MIN_PROB)
 
-        for epoch in range(self.epoch):
-            # create children
-            pop_child = self._create_children__(pop, g_best)
-            # create new pop by comparing fitness of corresponding each member in pop and children
-            pop = self._greedy_selection__(pop, pop_child)
-
-            # update global best position
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
-
-class JADE(Root):
+class SADE(Optimizer):
     """
-        The original version of: Differential Evolution (JADE)
-        Link:
-            JADE: Adaptive Differential Evolution with Optional External Archive
+    The original version of: Self-Adaptive Differential Evolution (SADE)
+
+    Links:
+        1. https://doi.org/10.1109/CEC.2005.1554904
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.evolutionary_based.DE import SADE
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> model = SADE(problem_dict1, epoch, pop_size)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Qin, A.K. and Suganthan, P.N., 2005, September. Self-adaptive differential evolution algorithm for
+    numerical optimization. In 2005 IEEE congress on evolutionary computation (Vol. 2, pp. 1785-1791). IEEE.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 miu_f=0.5, miu_cr=0.5, p=0.1, c=0.1, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.miu_f = miu_f              # the initial f, location is changed then that f is good
-        self.miu_cr = miu_cr            # the initial cr,
-        self.p = p # uniform(0.05, 0.2) # the x_best is select from the top 100p % solutions
-        self.c = c # uniform(1/20, 1/5) # the adaptation parameter control value of f and cr
+    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
 
-    ### Survivor Selection
-    def lehmer_mean(self, list_objects):
-        return sum(list_objects**2) / sum(list_objects)
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+        self.loop_probability = 50
+        self.loop_cr = 5
+        self.ns1 = self.ns2 = self.nf1 = self.nf2 = 0
+        self.crm = 0.5
+        self.p1 = 0.5
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop=pop, id_fit=self.ID_FIT, id_best=self.ID_MIN_PROB)
-        miu_cr = self.miu_cr
-        miu_f = self.miu_f
-        archive_pop = list()
+        # Dynamic variable
+        self.dyn_list_cr = list()
 
-        for epoch in range(self.epoch):
-            list_f = list()
-            list_cr = list()
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-            sorted_pop = sorted(pop, key=lambda x:x[self.ID_FIT])
-            for i in range(0, self.pop_size):
-                ## Calculate adaptive parameter cr and f
-                cr = normal(miu_cr, 0.1)
-                cr = clip(cr, 0, 1)
-                while True:
-                    f = cauchy.rvs(miu_f, 0.1)
-                    if f < 0:
-                        continue
-                    elif f > 1:
-                        f = 1
-                    break
-                top = int(self.pop_size * self.p)
-                x_best = sorted_pop[randint(0, top)]
-                x_r1 = pop[choice(list(set(range(0, self.pop_size)) - {i}))]
-                new_pop = pop + archive_pop
-                while True:
-                    x_r2 = new_pop[randint(0, len(new_pop))]
-                    if any(x_r2[self.ID_POS] - x_r1[self.ID_POS]) and any(x_r2[self.ID_POS] - pop[i][self.ID_POS]):
-                        break
-                x_new = pop[i][self.ID_POS] + f * (x_best[self.ID_POS] - pop[i][self.ID_POS]) + f * (x_r1[self.ID_POS] - x_r2[self.ID_POS])
-                pos_new = where(uniform(0, 1, self.problem_size) < cr, x_new, pop[i][self.ID_POS])
-                j_rand = randint(0, self.problem_size)
+        Args:
+            epoch (int): The current iteration
+        """
+        pop = []
+        list_probability = []
+        list_cr = []
+        for idx in range(0, self.pop_size):
+            ## Calculate adaptive parameter cr and f
+            cr = np.random.normal(self.crm, 0.1)
+            cr = np.clip(cr, 0, 1)
+            list_cr.append(cr)
+            while True:
+                f = np.random.normal(0.5, 0.3)
+                if f < 0:
+                    continue
+                elif f > 1:
+                    f = 1
+                break
+
+            id1, id2, id3 = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 3, replace=False)
+            if np.random.rand() < self.p1:
+                x_new = self.pop[id1][self.ID_POS] + f * (self.pop[id2][self.ID_POS] - self.pop[id3][self.ID_POS])
+                pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < cr, x_new, self.pop[idx][self.ID_POS])
+                j_rand = np.random.randint(0, self.problem.n_dims)
                 pos_new[j_rand] = x_new[j_rand]
-                fit_new = self.get_fitness_position(pos_new)
-                if fit_new < pop[i][self.ID_FIT]:
-                    archive_pop.append(pop[i])
-                    list_cr.append(cr)
-                    list_f.append(f)
-                    pop[i] = [pos_new, fit_new]
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                pop.append([pos_new, None])
+                list_probability.append(True)
+            else:
+                x_new = self.pop[idx][self.ID_POS] + f * (self.g_best[self.ID_POS] - self.pop[idx][self.ID_POS]) + \
+                        f * (self.pop[id1][self.ID_POS] - self.pop[id2][self.ID_POS])
+                pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < cr, x_new, self.pop[idx][self.ID_POS])
+                j_rand = np.random.randint(0, self.problem.n_dims)
+                pos_new[j_rand] = x_new[j_rand]
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                pop.append([pos_new, None])
+                list_probability.append(False)
+        pop = self.update_target_wrapper_population(pop)
 
-            # Randomly remove solution
-            temp = len(archive_pop) - self.pop_size
-            if temp > 0:
-                idx_list = choice(range(0, len(archive_pop)), len(archive_pop) - self.pop_size, replace=False)
-                archive_pop_new = []
-                for idx, solution in enumerate(archive_pop):
-                    if idx not in idx_list:
-                        archive_pop_new.append(solution)
-                archive_pop = deepcopy(archive_pop_new)
-
-            # Update miu_cr and miu_f
-            miu_cr = (1 - self.c) * miu_cr + self.c * mean(array(list_cr))
-            miu_f = (1 - self.c) * miu_f + self.c * self.lehmer_mean(array(list_f))
-
-            # update global best position
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
-
-class SADE(Root):
-    """
-        The original version of: Self-Adaptive Differential Evolution(SADE)
-        Link:
-            Self-adaptive differential evolution algorithm for numerical optimization
-    """
-
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-
-    ### Survivor Selection
-    def lehmer_mean(self, list_objects):
-        return sum(list_objects ** 2) / sum(list_objects)
-
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop=pop, id_fit=self.ID_FIT, id_best=self.ID_MIN_PROB)
-
-        list_cr = list()
-
-        loop_probability = 50
-        loop_cr = 5
-        ns1 = ns2 = nf1 = nf2 = 0
-        crm = 0.5
-        p1 = 0.5
-        for epoch in range(self.epoch):
-
-            for i in range(0, self.pop_size):
-                ## Calculate adaptive parameter cr and f
-                cr = normal(crm, 0.1)
-                cr = clip(cr, 0, 1)
-                while True:
-                    f = normal(0.5, 0.3)
-                    if f < 0:
-                        continue
-                    elif f > 1:
-                        f = 1
-                    break
-
-                id1, id2, id3 = choice(list(set(range(0, self.pop_size)) - {i}), 3, replace=False)
-                if rand() < p1:
-                    x_new = pop[id1][self.ID_POS] + f * (pop[id2][self.ID_POS] - pop[id3][self.ID_POS])
-                    pos_new = where(uniform(0, 1, self.problem_size) < cr, x_new, pop[i][self.ID_POS])
-                    j_rand = randint(0, self.problem_size)
-                    pos_new[j_rand] = x_new[j_rand]
-                    fit_new = self.get_fitness_position(pos_new)
-                    if fit_new < pop[i][self.ID_FIT]:
-                        ns1 += 1
-                        pop[i] = [pos_new, fit_new]
-                        list_cr.append(cr)
-                    else:
-                        nf1 += 1
+        for idx in range(0, self.pop_size):
+            if list_probability[idx]:
+                if self.compare_agent(pop[idx], self.pop[idx]):
+                    self.ns1 += 1
+                    self.pop[idx] = deepcopy(pop[idx])
                 else:
-                    x_new = pop[i][self.ID_POS] + f * (g_best[self.ID_POS] - pop[i][self.ID_POS]) + f * (pop[id1][self.ID_POS] - pop[id2][self.ID_POS])
-                    pos_new = where(uniform(0, 1, self.problem_size) < cr, x_new, pop[i][self.ID_POS])
-                    j_rand = randint(0, self.problem_size)
-                    pos_new[j_rand] = x_new[j_rand]
-                    fit_new = self.get_fitness_position(pos_new)
-                    if fit_new < pop[i][self.ID_FIT]:
-                        ns2 += 1
-                        pop[i] = [pos_new, fit_new]
-                        list_cr.append(cr)
-                    else:
-                        nf2 += 1
+                    self.nf1 += 1
+            else:
+                if self.compare_agent(pop[idx], self.pop[idx]):
+                    self.ns2 += 1
+                    self.dyn_list_cr.append(list_cr[idx])
+                    self.pop[idx] = deepcopy(pop[idx])
+                else:
+                    self.nf2 += 1
 
-            # Update cr and p1
-            if (epoch + 1) / loop_cr == 0:
-                crm = mean(list_cr)
-                list_cr = list()
+        # Update cr and p1
+        if (epoch + 1) / self.loop_cr == 0:
+            self.crm = np.mean(self.dyn_list_cr)
+            self.dyn_list_cr = list()
 
-            if (epoch + 1) / loop_probability == 0:
-                p1 = ns1 * (ns2 + nf2) / (ns2 * (ns1 + nf1) + ns1 * (ns2 + nf2))
-                ns1 = ns2 = nf1 = nf2 = 0
-
-            # update global best position
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        if (epoch + 1) / self.loop_probability == 0:
+            self.p1 = self.ns1 * (self.ns2 + self.nf2) / (self.ns2 * (self.ns1 + self.nf1) + self.ns1 * (self.ns2 + self.nf2))
+            self.ns1 = self.ns2 = self.nf1 = self.nf2 = 0
 
 
-class SHADE(Root):
+class SHADE(Optimizer):
     """
-        The original version of: Success-History Adaptation Differential Evolution (SHADE)
-        Link:
-            Success-History Based Parameter Adaptation for Differential Evolution
-    """
+    The variant version of: Success-History Adaptation Differential Evolution (SHADE)
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 miu_f=0.5, miu_cr=0.5, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.miu_f = miu_f  # list the initial f,
-        self.miu_cr = miu_cr  # list the initial cr,
+    Links:
+        1. https://doi.org/10.1109/CEC.2013.6557555
 
-    ### Survivor Selection
-    def weighted_lehmer_mean(self, list_objects, list_weights):
-        up = list_weights * list_objects**2
-        down = list_weights * list_objects
-        return sum(up) / sum(down)
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + miu_f (float): [0.4, 0.6], initial weighting factor, default = 0.5
+        + miu_cr (float): [0.4, 0.6], initial cross-over probability, default = 0.5
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop=pop, id_fit=self.ID_FIT, id_best=self.ID_MIN_PROB)
-        miu_cr = self.miu_cr * ones(self.pop_size)
-        miu_f = self.miu_f * ones(self.pop_size)
-        archive_pop = list()
-        k = 0
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.evolutionary_based.DE import SHADE
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> miu_f = 0.5
+    >>> miu_cr = 0.5
+    >>> model = SHADE(problem_dict1, epoch, pop_size, miu_f, miu_cr)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
-        for epoch in range(self.epoch):
-            list_f = list()
-            list_cr = list()
-            list_f_index = list()
-            list_cr_index = list()
-
-            list_f_new = ones(self.pop_size)
-            list_cr_new = ones(self.pop_size)
-            pop_new = deepcopy(pop) # Save all new elements --> Use to update the list_cr and list_f
-            pop_old = deepcopy(pop) # Save all old elements --> Use to update cr value
-            sorted_pop = sorted(pop, key=lambda x: x[self.ID_FIT])
-            for i in range(0, self.pop_size):
-                ## Calculate adaptive parameter cr and f
-                idx_rand = randint(0, self.pop_size)
-                cr = normal(miu_cr[idx_rand], 0.1)
-                cr = clip(cr, 0, 1)
-                while True:
-                    f = cauchy.rvs(miu_f[idx_rand], 0.1)
-                    if f < 0:
-                        continue
-                    elif f > 1:
-                        f = 1
-                    break
-                list_cr_new[i] = cr
-                list_f_new[i] = f
-                p = uniform(2/self.pop_size, 0.2)
-                top = int(self.pop_size * p)
-                x_best = sorted_pop[randint(0, top)]
-                x_r1 = pop[choice(list(set(range(0, self.pop_size)) - {i}))]
-                new_pop = pop + archive_pop
-                while True:
-                    x_r2 = new_pop[randint(0, len(new_pop))]
-                    if any(x_r2[self.ID_POS] - x_r1[self.ID_POS]) and any(x_r2[self.ID_POS] - pop[i][self.ID_POS]):
-                        break
-                x_new = pop[i][self.ID_POS] + f * (x_best[self.ID_POS] - pop[i][self.ID_POS]) + f * (x_r1[self.ID_POS] - x_r2[self.ID_POS])
-                pos_new = where(uniform(0, 1, self.problem_size) < cr, x_new, pop[i][self.ID_POS])
-                j_rand = randint(0, self.problem_size)
-                pos_new[j_rand] = x_new[j_rand]
-                fit_new = self.get_fitness_position(pos_new)
-                pop_new[i] = [pos_new, fit_new]
-
-            for i in range(0, self.pop_size):
-                if pop_new[i][self.ID_FIT] < pop[i][self.ID_FIT]:
-                    list_cr.append(list_cr_new[i])
-                    list_f.append(list_f_new[i])
-                    list_f_index.append(i)
-                    list_cr_index.append(i)
-                    pop[i] = pop_new[i]
-                    archive_pop.append(deepcopy(pop[i]))
-
-            # Randomly remove solution
-            temp = len(archive_pop) - self.pop_size
-            if temp > 0:
-                idx_list = choice(range(0, len(archive_pop)), len(archive_pop) - self.pop_size, replace=False)
-                archive_pop_new = []
-                for idx, solution in enumerate(archive_pop):
-                    if idx not in idx_list:
-                        archive_pop_new.append(solution)
-                archive_pop = deepcopy(archive_pop_new)
-
-            # Update miu_cr and miu_f
-            if len(list_f) != 0 and len(list_cr) != 0:
-                # Eq.13, 14, 10
-                list_fit_old = ones(len(list_cr_index))
-                list_fit_new = ones(len(list_cr_index))
-                idx_increase = 0
-                for i in range(0, self.pop_size):
-                    if i in list_cr_index:
-                        list_fit_old[idx_increase] = pop_old[i][self.ID_FIT]
-                        list_fit_new[idx_increase] = pop_new[i][self.ID_FIT]
-                        idx_increase += 1
-                list_weights = abs(list_fit_new - list_fit_old) / sum(abs(list_fit_new - list_fit_old))
-                miu_cr[k] = sum(list_weights * array(list_cr))
-                miu_f[k] = self.weighted_lehmer_mean(array(list_f), list_weights)
-                k += 1
-                if k >= self.pop_size:
-                    k = 0
-
-            # update global best position
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
-
-
-
-class L_SHADE(Root):
-    """
-        The original version of: Linear Population Size Reduction Success-History Adaptation Differential Evolution (LSHADE)
-        Link:
-            Improving the Search Performance of SHADE Using Linear Population Size Reduction
+    References
+    ~~~~~~~~~~
+    [1] Tanabe, R. and Fukunaga, A., 2013, June. Success-history based parameter adaptation for
+    differential evolution. In 2013 IEEE congress on evolutionary computation (pp. 71-78). IEEE.
     """
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100, miu_f=0.5, miu_cr=0.5, **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.miu_f = miu_f  # list the initial f,
-        self.miu_cr = miu_cr  # list the initial cr,
-        self.n_min = int(pop_size/5)
+    def __init__(self, problem, epoch=750, pop_size=100, miu_f=0.5, miu_cr=0.5, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            miu_f (float): initial weighting factor, default = 0.5
+            miu_cr (float): initial cross-over probability, default = 0.5
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        # the initial f, location is changed then that f is good
+        self.miu_f = self.validator.check_float("miu_f", miu_f, (0, 1.0))
+        # the initial cr,
+        self.miu_cr = self.validator.check_float("miu_cr", miu_cr, (0, 1.0))
+
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+        # Dynamic variable
+        self.dyn_miu_f = miu_f * np.ones(self.pop_size)  # list the initial f,
+        self.dyn_miu_cr = miu_cr * np.ones(self.pop_size)  # list the initial cr,
+        self.dyn_pop_archive = list()
+        self.k_counter = 0
 
     ### Survivor Selection
     def weighted_lehmer_mean(self, list_objects, list_weights):
@@ -431,136 +486,339 @@ class L_SHADE(Root):
         down = list_weights * list_objects
         return sum(up) / sum(down)
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop=pop, id_fit=self.ID_FIT, id_best=self.ID_MIN_PROB)
-        miu_cr = self.miu_cr * ones(self.pop_size)
-        miu_f = self.miu_f * ones(self.pop_size)
-        archive_pop = list()
-        k = 0
-        pop_size = self.pop_size
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-        for epoch in range(self.epoch):
-            list_f = list()
-            list_cr = list()
-            list_f_index = list()
-            list_cr_index = list()
+        Args:
+            epoch (int): The current iteration
+        """
+        list_f = list()
+        list_cr = list()
+        list_f_index = list()
+        list_cr_index = list()
 
-            list_f_new = ones(pop_size)
-            list_cr_new = ones(pop_size)
-            pop_new = deepcopy(pop)  # Save all new elements --> Use to update the list_cr and list_f
-            pop_old = deepcopy(pop)  # Save all old elements --> Use to update cr value
-            sorted_pop = sorted(pop, key=lambda x: x[self.ID_FIT])
-            for i in range(0, pop_size):
-                ## Calculate adaptive parameter cr and f
-                idx_rand = randint(0, pop_size)
-                cr = normal(miu_cr[idx_rand], 0.1)
-                cr = clip(cr, 0, 1)
-                while True:
-                    f = cauchy.rvs(miu_f[idx_rand], 0.1)
-                    if f < 0:
-                        continue
-                    elif f > 1:
-                        f = 1
+        list_f_new = np.ones(self.pop_size)
+        list_cr_new = np.ones(self.pop_size)
+        pop_old = deepcopy(self.pop)
+        pop_sorted = self.get_sorted_strim_population(self.pop)
+
+        pop = []
+        for idx in range(0, self.pop_size):
+            ## Calculate adaptive parameter cr and f
+            idx_rand = np.random.randint(0, self.pop_size)
+            cr = np.random.normal(self.dyn_miu_cr[idx_rand], 0.1)
+            cr = np.clip(cr, 0, 1)
+            while True:
+                f = cauchy.rvs(self.dyn_miu_f[idx_rand], 0.1)
+                if f < 0:
+                    continue
+                elif f > 1:
+                    f = 1
+                break
+            list_cr_new[idx] = cr
+            list_f_new[idx] = f
+            p = np.random.uniform(2 / self.pop_size, 0.2)
+            top = int(self.pop_size * p)
+            x_best = pop_sorted[np.random.randint(0, top)]
+            x_r1 = self.pop[np.random.choice(list(set(range(0, self.pop_size)) - {idx}))]
+            new_pop = self.pop + self.dyn_pop_archive
+            while True:
+                x_r2 = new_pop[np.random.randint(0, len(new_pop))]
+                if np.any(x_r2[self.ID_POS] - x_r1[self.ID_POS]) and np.any(x_r2[self.ID_POS] - self.pop[idx][self.ID_POS]):
                     break
-                list_cr_new[i] = cr
-                list_f_new[i] = f
-                p = uniform(0.15, 0.2)
-                top = int(pop_size * p)
-                x_best = sorted_pop[randint(0, top)]
-                x_r1 = pop[choice(list(set(range(0, pop_size)) - {i}))]
-                new_pop = pop + archive_pop
-                while True:
-                    x_r2 = new_pop[randint(0, len(new_pop))]
-                    if any(x_r2[self.ID_POS] - x_r1[self.ID_POS]) and any(x_r2[self.ID_POS] - pop[i][self.ID_POS]):
-                        break
-                x_new = pop[i][self.ID_POS] + f * (x_best[self.ID_POS] - pop[i][self.ID_POS]) + f * (x_r1[self.ID_POS] - x_r2[self.ID_POS])
-                pos_new = where(uniform(0, 1, self.problem_size) < cr, x_new, pop[i][self.ID_POS])
-                j_rand = randint(0, self.problem_size)
-                pos_new[j_rand] = x_new[j_rand]
-                fit_new = self.get_fitness_position(pos_new)
-                pop_new[i] = [pos_new, fit_new]
+            x_new = self.pop[idx][self.ID_POS] + f * (x_best[self.ID_POS] - self.pop[idx][self.ID_POS]) + f * (x_r1[self.ID_POS] - x_r2[self.ID_POS])
+            pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < cr, x_new, self.pop[idx][self.ID_POS])
+            j_rand = np.random.randint(0, self.problem.n_dims)
+            pos_new[j_rand] = x_new[j_rand]
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop.append([pos_new, None])
+        pop = self.update_target_wrapper_population(pop)
 
-            for i in range(0, pop_size):
-                if pop_new[i][self.ID_FIT] < pop[i][self.ID_FIT]:
-                    list_cr.append(list_cr_new[i])
-                    list_f.append(list_f_new[i])
-                    list_f_index.append(i)
-                    list_cr_index.append(i)
-                    pop[i] = pop_new[i]
-                    archive_pop.append(deepcopy(pop[i]))
+        for i in range(0, self.pop_size):
+            if self.compare_agent(pop[i], self.pop[i]):
+                list_cr.append(list_cr_new[i])
+                list_f.append(list_f_new[i])
+                list_f_index.append(i)
+                list_cr_index.append(i)
+                self.pop[i] = deepcopy(pop[i])
+                self.dyn_pop_archive.append(deepcopy(pop[i]))
 
-            # Randomly remove solution
-            temp = len(archive_pop) - pop_size
-            if temp > 0:
-                idx_list = choice(range(0, len(archive_pop)), len(archive_pop) - pop_size, replace=False)
-                archive_pop_new = []
-                for idx, solution in enumerate(archive_pop):
-                    if idx not in idx_list:
-                        archive_pop_new.append(solution)
-                archive_pop = deepcopy(archive_pop_new)
+        # Randomly remove solution
+        temp = len(self.dyn_pop_archive) - self.pop_size
+        if temp > 0:
+            idx_list = np.random.choice(range(0, len(self.dyn_pop_archive)), temp, replace=False)
+            archive_pop_new = []
+            for idx, solution in enumerate(self.dyn_pop_archive):
+                if idx not in idx_list:
+                    archive_pop_new.append(solution)
+            self.dyn_pop_archive = deepcopy(archive_pop_new)
 
-            # Update miu_cr and miu_f
-            if len(list_f) != 0 and len(list_cr) != 0:
-                # Eq.13, 14, 10
-                list_fit_old = ones(len(list_cr_index))
-                list_fit_new = ones(len(list_cr_index))
-                idx_increase = 0
-                for i in range(0, pop_size):
-                    if i in list_cr_index:
-                        list_fit_old[idx_increase] = pop_old[i][self.ID_FIT]
-                        list_fit_new[idx_increase] = pop_new[i][self.ID_FIT]
-                        idx_increase += 1
-                list_weights = abs(list_fit_new - list_fit_old) / sum(abs(list_fit_new - list_fit_old))
-                miu_cr[k] = sum(list_weights * array(list_cr))
-                miu_f[k] = self.weighted_lehmer_mean(array(list_f), list_weights)
-                k += 1
-                if k >= pop_size:
-                    k = 0
-
-            # Linear Population Size Reduction
-            pop_size = round(self.pop_size + epoch * ((self.n_min - self.pop_size)/self.epoch))
-
-            # update global best position
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        # Update miu_cr and miu_f
+        if len(list_f) != 0 and len(list_cr) != 0:
+            # Eq.13, 14, 10
+            list_fit_old = np.ones(len(list_cr_index))
+            list_fit_new = np.ones(len(list_cr_index))
+            idx_increase = 0
+            for i in range(0, self.pop_size):
+                if i in list_cr_index:
+                    list_fit_old[idx_increase] = pop_old[i][self.ID_TAR][self.ID_FIT]
+                    list_fit_new[idx_increase] = self.pop[i][self.ID_TAR][self.ID_FIT]
+                    idx_increase += 1
+            temp = sum(abs(list_fit_new - list_fit_old))
+            if temp == 0:
+                list_weights = 1.0 / len(list_fit_new) * np.ones(len(list_fit_new))
+            else:
+                list_weights = abs(list_fit_new - list_fit_old) / temp
+            self.dyn_miu_cr[self.k_counter] = sum(list_weights * np.array(list_cr))
+            self.dyn_miu_f[self.k_counter] = self.weighted_lehmer_mean(np.array(list_f), list_weights)
+            self.k_counter += 1
+            if self.k_counter >= self.pop_size:
+                self.k_counter = 0
 
 
-class SAP_DE(Root):
+class L_SHADE(Optimizer):
     """
-        The original version of: Differential Evolution with Self-Adaptive Populations
-        Link:
-            Exploring dynamic self-adaptive populations in differential evolution
+    The original version of: Linear Population Size Reduction Success-History Adaptation Differential Evolution (LSHADE)
+
+    Links:
+        1. https://metahack.org/CEC2014-Tanabe-Fukunaga.pdf
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + miu_f (float): [0.4, 0.6], initial weighting factor, default = 0.5
+        + miu_cr (float): [0.4, 0.6], initial cross-over probability, default = 0.5
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.evolutionary_based.DE import L_SHADE
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> miu_f = 0.5
+    >>> miu_cr = 0.5
+    >>> model = L_SHADE(problem_dict1, epoch, pop_size, miu_f, miu_cr)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Tanabe, R. and Fukunaga, A.S., 2014, July. Improving the search performance of SHADE using
+    linear population size reduction. In 2014 IEEE congress on evolutionary computation (CEC) (pp. 1658-1665). IEEE.
     """
+
+    def __init__(self, problem, epoch=750, pop_size=100, miu_f=0.5, miu_cr=0.5, **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            miu_f (float): initial weighting factor, default = 0.5
+            miu_cr (float): initial cross-over probability, default = 0.5
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        # the initial f, location is changed then that f is good
+        self.miu_f = self.validator.check_float("miu_f", miu_f, (0, 1.0))
+        # the initial cr,
+        self.miu_cr = self.validator.check_float("miu_cr", miu_cr, (0, 1.0))
+
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
+        # Dynamic variable
+        self.dyn_miu_f = self.miu_f * np.ones(self.pop_size)  # list the initial f,
+        self.dyn_miu_cr = self.miu_cr * np.ones(self.pop_size)  # list the initial cr,
+        self.dyn_pop_archive = list()
+        self.dyn_pop_size = self.pop_size
+        self.k_counter = 0
+        self.n_min = int(self.pop_size / 5)
+
+    ### Survivor Selection
+    def weighted_lehmer_mean(self, list_objects, list_weights):
+        up = sum(list_weights * list_objects ** 2)
+        down = sum(list_weights * list_objects)
+        return up / down if down != 0 else 0.5
+
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
+
+        Args:
+            epoch (int): The current iteration
+        """
+        list_f = list()
+        list_cr = list()
+        list_f_index = list()
+        list_cr_index = list()
+
+        list_f_new = np.ones(self.pop_size)
+        list_cr_new = np.ones(self.pop_size)
+        pop_old = deepcopy(self.pop)
+        pop_sorted = self.get_sorted_strim_population(self.pop)
+
+        pop = []
+        for idx in range(0, self.pop_size):
+            ## Calculate adaptive parameter cr and f
+            idx_rand = np.random.randint(0, self.pop_size)
+            cr = np.random.normal(self.dyn_miu_cr[idx_rand], 0.1)
+            cr = np.clip(cr, 0, 1)
+            while True:
+                f = cauchy.rvs(self.dyn_miu_f[idx_rand], 0.1)
+                if f < 0:
+                    continue
+                elif f > 1:
+                    f = 1
+                break
+            list_cr_new[idx] = cr
+            list_f_new[idx] = f
+            p = np.random.uniform(0.15, 0.2)
+            top = int(self.dyn_pop_size * p)
+            x_best = pop_sorted[np.random.randint(0, top)]
+            x_r1 = self.pop[np.random.choice(list(set(range(0, self.dyn_pop_size)) - {idx}))]
+            new_pop = self.pop + self.dyn_pop_archive
+            while True:
+                x_r2 = new_pop[np.random.randint(0, len(new_pop))]
+                if np.any(x_r2[self.ID_POS] - x_r1[self.ID_POS]) and np.any(x_r2[self.ID_POS] - self.pop[idx][self.ID_POS]):
+                    break
+            x_new = self.pop[idx][self.ID_POS] + f * (x_best[self.ID_POS] - self.pop[idx][self.ID_POS]) + f * (x_r1[self.ID_POS] - x_r2[self.ID_POS])
+            pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < cr, x_new, self.pop[idx][self.ID_POS])
+            j_rand = np.random.randint(0, self.problem.n_dims)
+            pos_new[j_rand] = x_new[j_rand]
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pop.append([pos_new, None])
+        pop = self.update_target_wrapper_population(pop)
+
+        for i in range(0, self.pop_size):
+            if self.compare_agent(pop[i], self.pop[i]):
+                list_cr.append(list_cr_new[i])
+                list_f.append(list_f_new[i])
+                list_f_index.append(i)
+                list_cr_index.append(i)
+                self.pop[i] = deepcopy(pop[i])
+                self.dyn_pop_archive.append(deepcopy(self.pop[i]))
+
+        # Randomly remove solution
+        temp = len(self.dyn_pop_archive) - self.pop_size
+        if temp > 0:
+            idx_list = np.random.choice(range(0, len(self.dyn_pop_archive)), temp, replace=False)
+            archive_pop_new = []
+            for idx, solution in enumerate(self.dyn_pop_archive):
+                if idx not in idx_list:
+                    archive_pop_new.append(solution)
+            self.dyn_pop_archive = deepcopy(archive_pop_new)
+
+        # Update miu_cr and miu_f
+        if len(list_f) != 0 and len(list_cr) != 0:
+            # Eq.13, 14, 10
+            list_fit_old = np.ones(len(list_cr_index))
+            list_fit_new = np.ones(len(list_cr_index))
+            idx_increase = 0
+            for i in range(0, self.dyn_pop_size):
+                if i in list_cr_index:
+                    list_fit_old[idx_increase] = pop_old[i][self.ID_TAR][self.ID_FIT]
+                    list_fit_new[idx_increase] = self.pop[i][self.ID_TAR][self.ID_FIT]
+                    idx_increase += 1
+            total_fit = sum(np.abs(list_fit_new - list_fit_old))
+            list_weights = 0 if total_fit == 0 else np.abs(list_fit_new - list_fit_old) / total_fit
+            self.dyn_miu_cr[self.k_counter] = sum(list_weights * np.array(list_cr))
+            self.dyn_miu_f[self.k_counter] = self.weighted_lehmer_mean(np.array(list_f), list_weights)
+            self.k_counter += 1
+            if self.k_counter >= self.dyn_pop_size:
+                self.k_counter = 0
+
+        # Linear Population Size Reduction
+        self.dyn_pop_size = round(self.pop_size + epoch * ((self.n_min - self.pop_size) / self.epoch))
+
+
+class SAP_DE(Optimizer):
+    """
+    The original version of: Differential Evolution with Self-Adaptive Populations (SAP_DE)
+
+    Links:
+        1. https://doi.org/10.1007/s00500-005-0537-1
+
+    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+        + branch (str): ["ABS" or "REL"], gaussian (absolute) or uniform (relative) method
+
+    Examples
+    ~~~~~~~~
+    >>> import numpy as np
+    >>> from mealpy.evolutionary_based.DE import SAP_DE
+    >>>
+    >>> def fitness_function(solution):
+    >>>     return np.sum(solution**2)
+    >>>
+    >>> problem_dict1 = {
+    >>>     "fit_func": fitness_function,
+    >>>     "lb": [-10, -15, -4, -2, -8],
+    >>>     "ub": [10, 15, 12, 8, 20],
+    >>>     "minmax": "min",
+    >>> }
+    >>>
+    >>> epoch = 1000
+    >>> pop_size = 50
+    >>> branch = "ABS"
+    >>> model = SAP_DE(problem_dict1, epoch, pop_size, branch)
+    >>> best_position, best_fitness = model.solve()
+    >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
+
+    References
+    ~~~~~~~~~~
+    [1] Teo, J., 2006. Exploring dynamic self-adaptive populations in differential evolution. Soft Computing, 10(8), pp.673-686.
+    """
+
     ID_CR = 2
     ID_MR = 3
     ID_PS = 4
 
-    def __init__(self, obj_func=None, lb=None, ub=None, verbose=True, epoch=750, pop_size=100,
-                 wf=0.8, cr=0.9, F=1, branch="ABS", **kwargs):
-        super().__init__(obj_func, lb, ub, verbose, kwargs)
-        self.epoch = epoch
-        self.pop_size = pop_size
-        self.weighting_factor = wf
-        self.crossover_rate = cr
-        self.F = F
-        self.M = pop_size
-        self.branch = branch            # absolute (ABS) or relative (REL)
+    def __init__(self, problem, epoch=750, pop_size=100, branch="ABS", **kwargs):
+        """
+        Args:
+            problem (dict): The problem dictionary
+            epoch (int): maximum number of iterations, default = 10000
+            pop_size (int): number of population size, default = 100
+            branch (str): gaussian (absolute) or uniform (relative) method
+        """
+        super().__init__(problem, kwargs)
+        self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
+        self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
+        self.branch = self.validator.check_str("branch", branch, ["ABS", "REL"])
+        self.fixed_pop_size = self.pop_size
+        self.nfe_per_epoch = self.pop_size
+        self.sort_flag = False
 
-    def create_solution(self, minmax=0):
-        position = uniform(self.lb, self.ub)
-        fitness = self.get_fitness_position(position=position, minmax=minmax)
-        crossover_rate = uniform(0, 1)
-        mutation_rate = uniform(0, 1)
+    def create_solution(self, lb=None, ub=None):
+        """
+        To get the position, fitness wrapper, target and obj list
+            + A[self.ID_POS]                  --> Return: position
+            + A[self.ID_TAR]                  --> Return: [target, [obj1, obj2, ...]]
+            + A[self.ID_TAR][self.ID_FIT]     --> Return: target
+            + A[self.ID_TAR][self.ID_OBJ]     --> Return: [obj1, obj2, ...]
+
+        Returns:
+            list: solution with format [position, target, crossover_rate, mutation_rate, pop_size]
+        """
+        position = self.generate_position(lb, ub)
+        position = self.amend_position(position, lb, ub)
+        target = self.get_target_wrapper(position)
+        crossover_rate = np.random.uniform(0, 1)
+        mutation_rate = np.random.uniform(0, 1)
         if self.branch == "ABS":
-            pop_size = int(10 * self.problem_size + normal(0, 1))
-        elif self.branch == "REL":
-            pop_size = int(10 * self.problem_size + uniform(-0.5, 0.5))
-        return [position, fitness, crossover_rate, mutation_rate, pop_size]
+            pop_size = int(10 * self.problem.n_dims + np.random.normal(0, 1))
+        else:  # elif self.branch == "REL":
+            pop_size = int(10 * self.problem.n_dims + np.random.uniform(-0.5, 0.5))
+        return [position, target, crossover_rate, mutation_rate, pop_size]
 
     def edit_to_range(self, var=None, lower=0, upper=1, func_value=None):
         while var <= lower or var >= upper:
@@ -570,76 +828,63 @@ class SAP_DE(Root):
                 var -= func_value()
         return var
 
-    def train(self):
-        pop = [self.create_solution() for _ in range(self.pop_size)]
-        g_best = self.get_global_best_solution(pop=pop, id_fit=self.ID_FIT, id_best=self.ID_MIN_PROB)
-        m_new = self.pop_size
+    def evolve(self, epoch):
+        """
+        The main operations (equations) of algorithm. Inherit from Optimizer class
 
-        for epoch in range(self.epoch):
+        Args:
+            epoch (int): The current iteration
+        """
+        pop = []
+        for idx in range(0, self.pop_size):
+            # Choose 3 random element and different to idx
+            idxs = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 3, replace=False)
+            j = np.random.randint(0, self.pop_size)
+            self.F = np.random.uniform(0, 1)
 
-            for i in range(0, self.pop_size):
-            ### create children
-                # Choose 3 random element and different to i
-                idxs = choice(list(set(range(0, self.pop_size)) - {i}), 3, replace=False)
-                j = randint(0, self.pop_size)
-                self.F = uniform(0, 1)
-
-                sol_new = deepcopy(pop[idxs[0]])
-                ## Crossover
-                if uniform(0, 1) < pop[i][self.ID_CR] or i == j:
-                    pos_new = pop[idxs[0]][self.ID_POS] + self.F * (pop[idxs[1]][self.ID_POS] - pop[idxs[2]][self.ID_POS])
-                    cr_new = pop[idxs[0]][self.ID_CR] + self.F * (pop[idxs[1]][self.ID_CR] - pop[idxs[2]][self.ID_CR])
-                    mr_new = pop[idxs[0]][self.ID_MR] + self.F * (pop[idxs[1]][self.ID_MR] - pop[idxs[2]][self.ID_MR])
-                    if self.branch == "ABS":
-                        ps_new = pop[idxs[0]][self.ID_PS] + int(self.F * (pop[idxs[1]][self.ID_PS] - pop[idxs[2]][self.ID_PS]))
-                    elif self.branch == "REL":
-                        ps_new = pop[idxs[0]][self.ID_PS] + self.F * (pop[idxs[1]][self.ID_PS] - pop[idxs[2]][self.ID_PS])
-                    pos_new = self.amend_position_faster(pos_new)
-                    fit_new = self.get_fitness_position(pos_new)
-                    cr_new = self.edit_to_range(cr_new, 0, 1, random)
-                    mr_new = self.edit_to_range(mr_new, 0, 1, random)
-                    sol_new = [pos_new, fit_new, cr_new, mr_new, ps_new]
-
-                ## Mutation
-                if uniform(0, 1) < pop[idxs[0]][self.ID_MR]:
-                    pos_new = pop[i][self.ID_POS] + normal(0, pop[idxs[0]][self.ID_MR])
-                    cr_new = normal(0, 1)
-                    mr_new = normal(0, 1)
-                    if self.branch == "ABS":
-                        ps_new = pop[i][self.ID_PS] + int(normal(0.5, 1))
-                    elif self.branch == "REL":
-                        ps_new = pop[i][self.ID_PS] + normal(0, pop[idxs[0]][self.ID_MR])
-                    pos_new = self.amend_position_faster(pos_new)
-                    fit_new = self.get_fitness_position(pos_new)
-                    sol_new = [pos_new, fit_new, cr_new, mr_new, ps_new]
-                pop[i] = deepcopy(sol_new)
-
-            # Calculate new population size
-            total = sum([pop[i][self.ID_PS] for i in range(0, self.pop_size)])
-            if self.branch == "ABS":
-                m_new = int(total / self.pop_size)
-            elif self.branch == "REL":
-                m_new = int(self.pop_size + total)
-            if m_new <= 4:
-                m_new = self.M + int(uniform(0, 4))
-            elif m_new > 4 * self.M:
-                m_new = self.M - int(uniform(0, 4))
-
-            ## Change population by population size
-            if m_new <= self.pop_size:
-                pop = pop[:m_new]
+            ## Crossover
+            if np.random.uniform(0, 1) < self.pop[idx][self.ID_CR] or idx == j:
+                pos_new = self.pop[idxs[0]][self.ID_POS] + self.F * (self.pop[idxs[1]][self.ID_POS] - self.pop[idxs[2]][self.ID_POS])
+                cr_new = self.pop[idxs[0]][self.ID_CR] + self.F * (self.pop[idxs[1]][self.ID_CR] - self.pop[idxs[2]][self.ID_CR])
+                mr_new = self.pop[idxs[0]][self.ID_MR] + self.F * (self.pop[idxs[1]][self.ID_MR] - self.pop[idxs[2]][self.ID_MR])
+                if self.branch == "ABS":
+                    ps_new = self.pop[idxs[0]][self.ID_PS] + int(self.F * (self.pop[idxs[1]][self.ID_PS] - self.pop[idxs[2]][self.ID_PS]))
+                else:  # elif self.branch == "REL":
+                    ps_new = self.pop[idxs[0]][self.ID_PS] + self.F * (self.pop[idxs[1]][self.ID_PS] - self.pop[idxs[2]][self.ID_PS])
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                cr_new = self.edit_to_range(cr_new, 0, 1, np.random.random)
+                mr_new = self.edit_to_range(mr_new, 0, 1, np.random.random)
+                pop.append([pos_new, None, cr_new, mr_new, ps_new])
             else:
-                pop_sorted = sorted(pop, key=lambda x: x[self.ID_FIT])
-                best = deepcopy(pop_sorted[0])
-                pop_best = [best for i in range(0, m_new - self.pop_size)]
-                pop = pop + pop_best
-            self.pop_size = m_new
+                pop.append(deepcopy(self.pop[idx]))
+            ## Mutation
+            if np.random.uniform(0, 1) < self.pop[idxs[0]][self.ID_MR]:
+                pos_new = self.pop[idx][self.ID_POS] + np.random.normal(0, self.pop[idxs[0]][self.ID_MR])
+                cr_new = np.random.normal(0, 1)
+                mr_new = np.random.normal(0, 1)
+                if self.branch == "ABS":
+                    ps_new = self.pop[idx][self.ID_PS] + int(np.random.normal(0.5, 1))
+                else:  # elif self.branch == "REL":
+                    ps_new = self.pop[idx][self.ID_PS] + np.random.normal(0, self.pop[idxs[0]][self.ID_MR])
+                pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+                pop.append([pos_new, None, cr_new, mr_new, ps_new])
+        pop = self.update_target_wrapper_population(pop)
 
-            # update global best position
-            g_best = self.update_global_best_solution(pop, self.ID_MIN_PROB, g_best)
-            self.loss_train.append(g_best[self.ID_FIT])
-            if self.verbose:
-                print("> Epoch: {}, Best fit: {}".format(epoch + 1, g_best[self.ID_FIT]))
-        self.solution = g_best
-        return g_best[self.ID_POS], g_best[self.ID_FIT], self.loss_train
+        # Calculate new population size
+        total = sum([pop[i][self.ID_PS] for i in range(0, self.pop_size)])
+        if self.branch == "ABS":
+            m_new = int(total / self.pop_size)
+        else:  # elif self.branch == "REL":
+            m_new = int(self.pop_size + total)
+        if m_new <= 4:
+            m_new = self.fixed_pop_size + int(np.random.uniform(0, 4))
+        elif m_new > 4 * self.fixed_pop_size:
+            m_new = self.fixed_pop_size - int(np.random.uniform(0, 4))
 
+        ## Change population by population size
+        if m_new <= self.pop_size:
+            self.pop = pop[:m_new]
+        else:
+            pop_sorted = self.get_sorted_strim_population(pop)
+            self.pop = pop + pop_sorted[:m_new - self.pop_size]
+        self.pop_size = len(self.pop)
