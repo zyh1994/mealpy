@@ -1,15 +1,14 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 13:59, 24/06/2021 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
 # --------------------------------------------------%
 
 import numpy as np
-from copy import deepcopy
 from mealpy.optimizer import Optimizer
 
 
-class BaseCOA(Optimizer):
+class OriginalCOA(Optimizer):
     """
     The original version of: Coyote Optimization Algorithm (COA)
 
@@ -17,13 +16,13 @@ class BaseCOA(Optimizer):
         1. https://ieeexplore.ieee.org/document/8477769
         2. https://github.com/jkpir/COA/blob/master/COA.py  (Old version Mealpy < 1.2.2)
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + n_coyotes (int): [3, 15], number of coyotes per group, default=5
 
     Examples
     ~~~~~~~~
     >>> import numpy as np
-    >>> from mealpy.swarm_based.COA import BaseCOA
+    >>> from mealpy.swarm_based.COA import OriginalCOA
     >>>
     >>> def fitness_function(solution):
     >>>     return np.sum(solution**2)
@@ -38,8 +37,8 @@ class BaseCOA(Optimizer):
     >>> epoch = 1000
     >>> pop_size = 50
     >>> n_coyotes = 5
-    >>> model = BaseCOA(problem_dict1, epoch, pop_size, n_coyotes)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalCOA(epoch, pop_size, n_coyotes)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -50,52 +49,41 @@ class BaseCOA(Optimizer):
 
     ID_AGE = 2
 
-    def __init__(self, problem, epoch=10000, pop_size=100, n_coyotes=5, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, n_coyotes=5, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             n_coyotes (int): number of coyotes per group, default=5
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.n_coyotes = self.validator.check_int("n_coyotes", n_coyotes, [2, int(self.pop_size / 2)])
+        self.set_parameters(["epoch", "pop_size", "n_coyotes"])
         self.n_packs = int(pop_size / self.n_coyotes)
-        self.ps = 1 / self.problem.n_dims
-        self.p_leave = 0.005 * (self.n_coyotes ** 2)  # Probability of leaving a pack
-        self.nfe_per_epoch = self.pop_size + 1
         self.sort_flag = False
 
-    def create_solution(self, lb=None, ub=None):
+    def initialization(self):
+        if self.pop is None:
+            self.pop = self.create_population(self.pop_size)
+        self.pop_group = self.create_pop_group(self.pop, self.n_packs, self.n_coyotes)
+        self.ps = 1 / self.problem.n_dims
+        self.p_leave = 0.005 * (self.n_coyotes ** 2)  # Probability of leaving a pack
+
+    def create_solution(self, lb=None, ub=None, pos=None):
         """
-        To get the position, fitness wrapper, target and obj list
-            + A[self.ID_POS]                  --> Return: position
-            + A[self.ID_TAR]                  --> Return: [target, [obj1, obj2, ...]]
-            + A[self.ID_TAR][self.ID_FIT]     --> Return: target
-            + A[self.ID_TAR][self.ID_OBJ]     --> Return: [obj1, obj2, ...]
+        Overriding method in Optimizer class
 
         Returns:
             list: wrapper of solution with format [position, target, age]
         """
-        pos = np.random.uniform(lb, ub)
+        if pos is None:
+            pos = self.generate_position(lb, ub)
         pos = self.amend_position(pos, lb, ub)
         target = self.get_target_wrapper(pos)
         age = 1
         return [pos, target, age]
-
-    def _create_pop_group(self, pop):
-        pop_group = []
-        for i in range(0, self.n_packs):
-            group = pop[i * self.n_coyotes:(i + 1) * self.n_coyotes]
-            pop_group.append(group)
-        return pop_group
-
-    def initialization(self):
-        self.pop = self.create_population(self.pop_size)
-        self.pop_group = self._create_pop_group(self.pop)
-        _, self.g_best = self.get_global_best_solution(self.pop)
 
     def evolve(self, epoch):
         """
@@ -104,7 +92,6 @@ class BaseCOA(Optimizer):
         Args:
             epoch (int): The current iteration
         """
-        nfe_epoch = 0
         # Execute the operations inside each pack
         for p in range(self.n_packs):
             # Get the coyotes that belong to each pack
@@ -127,9 +114,10 @@ class BaseCOA(Optimizer):
                 # Keep the coyotes in the search space (optimization problem constraint)
                 pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
                 pop_new.append([pos_new, None, self.pop_group[p][i][self.ID_AGE]])
+                if self.mode not in self.AVAILABLE_MODES:
+                    pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
             # Evaluate the new social condition (Eq. 13)
             pop_new = self.update_target_wrapper_population(pop_new)
-            nfe_epoch += self.n_coyotes
             # Adaptation (Eq. 14)
             self.pop_group[p] = self.greedy_selection_population(self.pop_group[p], pop_new)
 
@@ -137,18 +125,17 @@ class BaseCOA(Optimizer):
             id_dad, id_mom = np.random.choice(list(range(0, self.n_coyotes)), 2, replace=False)
             prob1 = (1 - self.ps) / 2
             # Generate the pup considering intrinsic and extrinsic influence
-            pup = np.where(np.random.uniform(0, 1, self.problem.n_dims) < prob1,
+            pup = np.where(np.random.random(self.problem.n_dims) < prob1,
                            self.pop_group[p][id_dad][self.ID_POS], self.pop_group[p][id_mom][self.ID_POS])
             # Eventual noise
             pos_new = np.random.normal(0, 1) * pup
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             target = self.get_target_wrapper(pos_new)
-            nfe_epoch += 1
 
             # Verify if the pup will survive
             packs, local_best = self.get_global_best_solution(self.pop_group[p])
             # Find index of element has fitness larger than new child
-            # If existed a element like that, new child is good
+            # If existed an element like that, new child is good
             if self.compare_agent([pos_new, target], packs[-1]):
                 if self.problem.minmax == "min":
                     packs = sorted(packs, key=lambda agent: agent[self.ID_AGE])
@@ -156,7 +143,7 @@ class BaseCOA(Optimizer):
                     packs = sorted(packs, key=lambda agent: agent[self.ID_AGE], reverse=True)
                 # Replace worst element by new child, New born child with age = 0
                 packs[-1] = [pos_new, target, 0]
-                self.pop_group[p] = deepcopy(packs)
+                self.pop_group[p] = packs.copy()
 
         # A coyote can leave a pack and enter in another pack (Eq. 4)
         if self.n_packs > 1:

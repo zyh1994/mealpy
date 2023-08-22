@@ -6,15 +6,14 @@
 
 import concurrent.futures as parallel
 from functools import partial
+from pathlib import Path
 from opfunu.cec_basic import cec2014_nobias
 from pandas import DataFrame
 from mealpy.evolutionary_based.DE import BaseDE
-from os import getcwd, path, makedirs
+
 
 PATH_RESULTS = "history/results/"
-check_dir = f"{getcwd()}/{PATH_RESULTS}"
-if not path.exists(check_dir):
-    makedirs(check_dir)
+Path(PATH_RESULTS).mkdir(parents=True, exist_ok=True)
 
 model_name = "DE"
 n_dims = 30
@@ -28,10 +27,11 @@ def find_minimum(function_name, n_dims):
         "lb": [-100, ] * n_dims,
         "ub": [100, ] * n_dims,
         "minmax": "min",
-        "verbose": True,
+        "log_to": "console",
+        "name": function_name
     }
-    model = BaseDE(problem, epoch=10, pop_size=50, wf=0.8, cr=0.9, name=model_name, fit_name=function_name)
-    _, best_fitness = model.solve()
+    model = BaseDE(epoch=10, pop_size=50, wf=0.8, cr=0.9, name=model_name)
+    _, best_fitness = model.solve(problem)
     print(f"Finish function: {function_name}")
 
     return {

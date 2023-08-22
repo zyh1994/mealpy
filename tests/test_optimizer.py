@@ -5,6 +5,7 @@
 # --------------------------------------------------%
 
 from mealpy.optimizer import Optimizer
+from mealpy.utils.problem import Problem
 import numpy as np
 import pytest
 
@@ -21,7 +22,9 @@ def model():
         "minmax": "min",
         "log_to": None,
     }
-    model = Optimizer(problem)
+    model = Optimizer()
+    model.problem = Problem(**problem)
+    model.generate_position = model.problem.generate_position
     return model
 
 
@@ -30,8 +33,8 @@ def test_amend_position(model):
     UB = model.problem.ub
     pos = np.array([-15.4, 100, 0.4, -9, 7])
     pos = model.amend_position(pos, LB, UB)
-    comparison = (pos == np.array([-10, 10, 0.4, -9, 7]))
-    assert comparison.all()
+    print(pos)
+    assert np.all(pos == np.array([-10, 10, 0.4, -9, 7]))
 
 
 def test_get_target_wrapper(model):
@@ -56,7 +59,7 @@ def test_create_population(model):
     pop = model.create_population(pop_size=n_agent)
     idx_rand = np.random.choice(range(0, n_agent))
     agent = pop[idx_rand]
-    assert type(pop) == list
+    assert type(pop) is list
     assert len(pop) == n_agent
     assert len(agent) == 2
     assert len(agent[model.ID_POS]) == model.problem.n_dims
@@ -72,6 +75,7 @@ def test_update_target_wrapper_population(model):
         [np.array([5, -4, 0, 1, -1]), None]
     ]
     list_targets = [model.get_target_wrapper(agent[model.ID_POS]) for agent in pop]
+    model.mode = "thread"
     pop = model.update_target_wrapper_population(pop)
     for idx, agent in enumerate(pop):
         assert agent[model.ID_TAR] is not None
@@ -220,7 +224,7 @@ def test_create_opposition_position(model):
         [np.array([0, 1, 2, 3, 4]), [30, [30]]],
         [np.array([0, 0, 0, 0, 2]), [4, [4]]],
     ]
-    g_best = [np.array([0, 0, 0, 0, 1]) , [1, [1]]]
+    g_best = [np.array([0, 0, 0, 0, 1]), [1, [1]]]
     pos_opposite = model.create_opposition_position(pop[0], g_best)
     assert isinstance(pos_opposite, np.ndarray)
     assert len(pos_opposite) == model.problem.n_dims
@@ -242,3 +246,11 @@ def test_crossover_arithmetic(model):
     assert len(pos_child1) == len(pos_child2)
     assert isinstance(pos_child1, np.ndarray)
     assert len(pos_child2) == model.problem.n_dims
+
+
+def test_get_index_roulette_wheel_selection(model):
+    model.problem.minmax = "max"
+    list_fitness = np.random.rand(10) * 0.0001 + 1  # flat landscape
+    list_fitness[-1] = 1.1  # local optima as a small 10% bump
+    idx = model.get_index_roulette_wheel_selection(list_fitness)
+    assert type(idx) is int

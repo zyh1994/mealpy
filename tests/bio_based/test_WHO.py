@@ -31,11 +31,8 @@ def test_BaseWHO_results(problem):
     n_e = 3
     eta = 0.15
     p_hi = 0.9
-    local_move = (0.9, 0.3)
-    global_move = (0.2, 0.8)
-    delta = (2.0, 2.0)
-    model = WHO.BaseWHO(problem, epoch, pop_size, n_s, n_e, eta, p_hi, local_move, global_move, delta)
-    best_position, best_fitness = model.solve()
+    model = WHO.OriginalWHO(epoch, pop_size, n_s, n_e, eta, p_hi)
+    best_position, best_fitness = model.solve(problem)
     assert isinstance(model, Optimizer)
     assert isinstance(best_position, np.ndarray)
     assert len(best_position) == len(problem["lb"])
@@ -53,12 +50,11 @@ def test_BaseWHO_results(problem):
                          ])
 def test_epoch_WHO(problem, epoch, system_code):
     pop_size = 50
-    algorithms = [WHO.BaseWHO]
+    algorithms = [WHO.OriginalWHO]
     for algorithm in algorithms:
-        with pytest.raises(SystemExit) as e:
-            model = algorithm(problem, epoch, pop_size)
-        assert e.type == SystemExit
-        assert e.value.code == system_code
+        with pytest.raises(ValueError) as e:
+            algorithm(epoch, pop_size)
+        assert e.type == ValueError
 
 
 @pytest.mark.parametrize("problem, pop_size, system_code",
@@ -73,12 +69,11 @@ def test_epoch_WHO(problem, epoch, system_code):
                          ])
 def test_pop_size_WHO(problem, pop_size, system_code):
     epoch = 10
-    algorithms = [WHO.BaseWHO]
+    algorithms = [WHO.OriginalWHO]
     for algorithm in algorithms:
-        with pytest.raises(SystemExit) as e:
-            model = algorithm(problem, epoch, pop_size)
-        assert e.type == SystemExit
-        assert e.value.code == system_code
+        with pytest.raises(ValueError) as e:
+            algorithm(epoch, pop_size)
+        assert e.type == ValueError
 
 
 @pytest.mark.parametrize("problem, p_hi, system_code",
@@ -94,12 +89,11 @@ def test_pop_size_WHO(problem, pop_size, system_code):
                              (problem, -0.01, 0),
                          ])
 def test_p_hi_WHO(problem, p_hi, system_code):
-    algorithms = [WHO.BaseWHO]
+    algorithms = [WHO.OriginalWHO]
     for algorithm in algorithms:
-        with pytest.raises(SystemExit) as e:
-            model = algorithm(problem, 10, 50, p_hi=p_hi)
-        assert e.type == SystemExit
-        assert e.value.code == system_code
+        with pytest.raises(ValueError) as e:
+            algorithm(50, p_hi=p_hi)
+        assert e.type == ValueError
 
 
 @pytest.mark.parametrize("problem, eta, system_code",
@@ -115,15 +109,33 @@ def test_p_hi_WHO(problem, p_hi, system_code):
                              (problem, -0.01, 0),
                          ])
 def test_eta_WHO(problem, eta, system_code):
-    algorithms = [WHO.BaseWHO]
+    algorithms = [WHO.OriginalWHO]
     for algorithm in algorithms:
-        with pytest.raises(SystemExit) as e:
-            model = algorithm(problem, 10, 50, eta=eta)
-        assert e.type == SystemExit
-        assert e.value.code == system_code
+        with pytest.raises(ValueError) as e:
+            algorithm(50, eta=eta)
+        assert e.type == ValueError
 
 
-@pytest.mark.parametrize("problem, n_s, system_code",
+@pytest.mark.parametrize("problem, n_explore_step, system_code",
+                         [
+                             (problem, None, 0),
+                             (problem, "hello", 0),
+                             (problem, [10], 0),
+                             (problem, (0, 9), 0),
+                             (problem, 1, 0),
+                             (problem, 50, 0),
+                             (problem, 100, 0),
+                             (problem, 1.6, 0),
+                         ])
+def test_n_s_WHO(problem, n_explore_step, system_code):
+    algorithms = [WHO.OriginalWHO]
+    for algorithm in algorithms:
+        with pytest.raises(ValueError) as e:
+            algorithm(50, n_explore_step=n_explore_step)
+        assert e.type == ValueError
+
+
+@pytest.mark.parametrize("problem, n_exploit_step, system_code",
                          [
                              (problem, None, 0),
                              (problem, "hello", 0),
@@ -135,32 +147,9 @@ def test_eta_WHO(problem, eta, system_code):
                              (problem, 100, 0),
                              (problem, 1.6, 0),
                          ])
-def test_n_s_WHO(problem, n_s, system_code):
-    algorithms = [WHO.BaseWHO]
+def test_n_e_WHO(problem, n_exploit_step, system_code):
+    algorithms = [WHO.OriginalWHO]
     for algorithm in algorithms:
-        with pytest.raises(SystemExit) as e:
-            model = algorithm(problem, 10, 50, n_s=n_s)
-        assert e.type == SystemExit
-        assert e.value.code == system_code
-
-
-@pytest.mark.parametrize("problem, n_e, system_code",
-                         [
-                             (problem, None, 0),
-                             (problem, "hello", 0),
-                             (problem, -1.0, 0),
-                             (problem, [10], 0),
-                             (problem, (0, 9), 0),
-                             (problem, 1, 0),
-                             (problem, 50, 0),
-                             (problem, 100, 0),
-                             (problem, 1.6, 0),
-                         ])
-def test_n_e_WHO(problem, n_e, system_code):
-    algorithms = [WHO.BaseWHO]
-    for algorithm in algorithms:
-        with pytest.raises(SystemExit) as e:
-            model = algorithm(problem, 10, 50, n_e=n_e)
-        assert e.type == SystemExit
-        assert e.value.code == system_code
-
+        with pytest.raises(ValueError) as e:
+            algorithm(50, n_exploit_step=n_exploit_step)
+        assert e.type == ValueError

@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 23:58, 14/12/2021 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -44,6 +44,8 @@ class HybridMlp:
             "lb": [-1, ] * self.n_dims,
             "ub": [1, ] * self.n_dims,
             "minmax": "max",
+            "log_to": None,
+            "save_population": False
         }
 
     def decode_solution(self, solution):
@@ -70,9 +72,9 @@ class HybridMlp:
     def training(self):
         self.create_network()
         self.create_problem()
-        self.optimizer = GWO.BaseGWO(self.problem, self.epoch, self.pop_size)
-        # self.optimizer = FPA.BaseFPA(self.problem, self.epoch, self.pop_size)
-        self.solution, self.best_fit = self.optimizer.solve()
+        self.optimizer = GWO.OriginalGWO(self.epoch, self.pop_size)
+        # self.optimizer = FPA.OriginalFPA(self.problem, self.epoch, self.pop_size)
+        self.solution, self.best_fit = self.optimizer.solve(self.problem)
 
     def fitness_function(self, solution):  # Used in training process
         # Assumption that we have 3 layer , 1 input layer, 1 hidden layer and 1 output layer

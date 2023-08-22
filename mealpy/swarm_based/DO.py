@@ -1,16 +1,14 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 04:43, 02/03/2021 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
 # --------------------------------------------------%
 
 import numpy as np
-import math
-from copy import deepcopy
 from mealpy.optimizer import Optimizer
 
 
-class BaseDO(Optimizer):
+class OriginalDO(Optimizer):
     """
     The original version of: Dragonfly Optimization (DO)
 
@@ -20,7 +18,7 @@ class BaseDO(Optimizer):
     Examples
     ~~~~~~~~
     >>> import numpy as np
-    >>> from mealpy.swarm_based.DO import BaseDO
+    >>> from mealpy.swarm_based.DO import OriginalDO
     >>>
     >>> def fitness_function(solution):
     >>>     return np.sum(solution**2)
@@ -34,8 +32,8 @@ class BaseDO(Optimizer):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> model = BaseDO(problem_dict1, epoch, pop_size)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalDO(epoch, pop_size)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -45,39 +43,25 @@ class BaseDO(Optimizer):
     Neural computing and applications, 27(4), pp.1053-1073.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
         """
-
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
-        self.nfe_per_epoch = 2 * self.pop_size
+        self.set_parameters(["epoch", "pop_size"])
         self.sort_flag = False
 
-    def dragonfly_levy(self):
-        beta = 3 / 2
-        # Eq.(3.10)
-        sigma = (math.gamma(1 + beta) * np.sin(np.pi * beta / 2) / (math.gamma((1 + beta) / 2) * beta * 2 ** ((beta - 1) / 2))) ** (1 / beta)
-        u = np.random.randn(self.problem.n_dims) * sigma
-        v = np.random.randn(self.problem.n_dims)
-        step = u / np.abs(v) ** (1 / beta)
-        # Eq.(3.9)
-        return 0.01 * step
-
     def initialization(self):
-        # Initial radius of dragonflies' neighbouhoods
+        if self.pop is None:
+            self.pop = self.create_population(self.pop_size)
+        self.pop_delta = self.create_population(self.pop_size)
+        # Initial radius of dragonflies' neighborhoods
         self.radius = (self.problem.ub - self.problem.lb) / 10
         self.delta_max = (self.problem.ub - self.problem.lb) / 10
-
-        # Initial population
-        self.pop = self.create_population(self.pop_size)
-        _, self.g_best = self.get_global_best_solution(self.pop)
-        self.pop_delta = self.create_population(self.pop_size)
 
     def evolve(self, epoch):
         """
@@ -100,6 +84,8 @@ class BaseDO(Optimizer):
         f = 2 * np.random.rand()  # Food attraction weight
         e = my_c  # Enemy distraction weight
 
+        pop_new = []
+        pop_delta_new = []
         for i in range(0, self.pop_size):
             pos_neighbours = []
             pos_neighbours_delta = []
@@ -111,7 +97,6 @@ class BaseDO(Optimizer):
                     neighbours_num += 1
                     pos_neighbours.append(self.pop[j][self.ID_POS])
                     pos_neighbours_delta.append(self.pop_delta[j][self.ID_POS])
-
             pos_neighbours = np.array(pos_neighbours)
             pos_neighbours_delta = np.array(pos_neighbours_delta)
 
@@ -122,8 +107,8 @@ class BaseDO(Optimizer):
                 C_temp = np.sum(pos_neighbours, axis=0) / neighbours_num
             else:
                 S = np.zeros(self.problem.n_dims)
-                A = deepcopy(self.pop_delta[i][self.ID_POS])
-                C_temp = deepcopy(self.pop[i][self.ID_POS])
+                A = self.pop_delta[i][self.ID_POS].copy()
+                C_temp = self.pop[i][self.ID_POS].copy()
             C = C_temp - self.pop[i][self.ID_POS]
 
             # Attraction to food: Eq 3.4
@@ -140,17 +125,17 @@ class BaseDO(Optimizer):
             else:
                 enemy = np.zeros(self.problem.n_dims)
 
-            pos_new = deepcopy(self.pop[i][self.ID_POS]).astype(float)
-            pos_delta_new = deepcopy(self.pop_delta[i][self.ID_POS]).astype(float)
+            pos_new = self.pop[i][self.ID_POS].copy().astype(float)
+            pos_delta_new = self.pop_delta[i][self.ID_POS].copy().astype(float)
             if np.any(dist_to_food > r):
                 if neighbours_num > 1:
                     temp = w * self.pop_delta[i][self.ID_POS] + np.random.uniform(0, 1, self.problem.n_dims) * A + \
                            np.random.uniform(0, 1, self.problem.n_dims) * C + np.random.uniform(0, 1, self.problem.n_dims) * S
                     temp = np.clip(temp, -1 * self.delta_max, self.delta_max)
-                    pos_delta_new = deepcopy(temp)
+                    pos_delta_new = temp.copy()
                     pos_new += temp
                 else:  # Eq. 3.8
-                    pos_new += self.dragonfly_levy() * self.pop[i][self.ID_POS]
+                    pos_new += self.get_levy_flight_step(beta=1.5, multiplier=0.01, case=-1) * self.pop[i][self.ID_POS]
                     pos_delta_new = np.zeros(self.problem.n_dims)
             else:
                 # Eq. 3.6
@@ -160,8 +145,17 @@ class BaseDO(Optimizer):
                 pos_new += temp
 
             # Amend solution
-            self.pop[i][self.ID_POS] = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
-            self.pop_delta[i][self.ID_POS] = self.amend_position(pos_delta_new, self.problem.lb, self.problem.ub)
-
-        self.pop = self.update_target_wrapper_population(self.pop)
-        self.pop_delta = self.update_target_wrapper_population(self.pop_delta)
+            pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
+            pos_delta_new = self.amend_position(pos_delta_new, self.problem.lb, self.problem.ub)
+            pop_new.append([pos_new, None])
+            pop_delta_new.append([pos_delta_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                target_delta = self.get_target_wrapper(pos_delta_new)
+                self.pop[i] = self.get_better_solution([pos_new, target], self.pop[i])
+                self.pop_delta[i] = self.get_better_solution([pos_delta_new, target_delta], self.pop_delta[i])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            pop_delta_new = self.update_target_wrapper_population(pop_delta_new)
+            self.pop = self.greedy_selection_population(pop_new, self.pop)
+            self.pop_delta = self.greedy_selection_population(pop_delta_new, self.pop_delta)

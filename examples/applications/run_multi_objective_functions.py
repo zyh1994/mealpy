@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 17:40, 06/11/2021 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -32,8 +32,8 @@ problem_dict1 = {
 }
 
 ## Run the algorithm
-model1 = SMA.BaseSMA(problem_dict1, epoch=100, pop_size=50, pr=0.03)
-best_position, best_fitness = model1.solve()
+model1 = SMA.BaseSMA(epoch=100, pop_size=50, pr=0.03)
+best_position, best_fitness = model1.solve(problem_dict1)
 print(f"Best solution: {best_position}, Best fitness: {best_fitness}")
 
 ## You can access all of available figures via object "history" like this:

@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 12:09, 02/03/2021 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -15,7 +15,7 @@ class OriginalCA(Optimizer):
     Links:
         1. https://github.com/clever-algorithms/CleverAlgorithms
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + accepted_rate (float): [0.1, 0.5], probability of accepted rate, default: 0.15
 
     Examples
@@ -36,8 +36,8 @@ class OriginalCA(Optimizer):
     >>> epoch = 1000
     >>> pop_size = 50
     >>> accepted_rate = 0.15
-    >>> model = OriginalCA(problem_dict1, epoch, pop_size, accepted_rate)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalCA(epoch, pop_size, accepted_rate)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -46,21 +46,23 @@ class OriginalCA(Optimizer):
     In 2009 International Conference on Sustainable Power Generation and Supply (pp. 1-6). IEEE.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, accepted_rate=0.15, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, accepted_rate=0.15, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             accepted_rate (float): probability of accepted rate, default: 0.15
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
 
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.accepted_rate = self.validator.check_float("accepted_rate", accepted_rate, (0, 1.0))
-        self.nfe_per_epoch = self.pop_size
+        self.set_parameters(["epoch", "pop_size", "accepted_rate"])
+        self.support_parallel_modes = False
         self.sort_flag = True
+
+    def initialize_variables(self):
         ## Dynamic variables
         self.dyn_belief_space = {
             "lb": self.problem.lb,
@@ -69,13 +71,13 @@ class OriginalCA(Optimizer):
         self.dyn_accepted_num = int(self.accepted_rate * self.pop_size)
         # update situational knowledge (g_best here is a element inside belief space)
 
-    def create_faithful(self, lb, ub):
+    def create_faithful__(self, lb, ub):
         position = self.generate_position(lb, ub)
         position = self.amend_position(position, lb, ub)
         target = self.get_target_wrapper(position)
         return [position, target]
 
-    def update_belief_space(self, belief_space, pop_accepted):
+    def update_belief_space__(self, belief_space, pop_accepted):
         pos_list = np.array([solution[self.ID_POS] for solution in pop_accepted])
         belief_space["lb"] = np.min(pos_list, axis=0)
         belief_space["ub"] = np.max(pos_list, axis=0)
@@ -89,7 +91,7 @@ class OriginalCA(Optimizer):
             epoch (int): The current iteration
         """
         # create next generation
-        pop_child = [self.create_faithful(self.dyn_belief_space["lb"], self.dyn_belief_space["ub"]) for _ in range(0, self.pop_size)]
+        pop_child = [self.create_faithful__(self.dyn_belief_space["lb"], self.dyn_belief_space["ub"]) for _ in range(0, self.pop_size)]
 
         # select next generation
         pop_new = []
@@ -97,14 +99,12 @@ class OriginalCA(Optimizer):
         size_new = len(pop_full)
         for _ in range(0, self.pop_size):
             id1, id2 = np.random.choice(list(range(0, size_new)), 2, replace=False)
-            if self.compare_agent(pop_full[id1], pop_full[id2]):
-                pop_new.append(pop_full[id1])
-            else:
-                pop_new.append(pop_full[id2])
+            agent = self.get_better_solution(pop_full[id1], pop_full[id2])
+            pop_new.append(agent)
         self.pop = self.get_sorted_strim_population(pop_new)
 
         # Get accepted faithful
         accepted = self.pop[:self.dyn_accepted_num]
 
         # Update belief_space
-        self.dyn_belief_space = self.update_belief_space(self.dyn_belief_space, accepted)
+        self.dyn_belief_space = self.update_belief_space__(self.dyn_belief_space, accepted)

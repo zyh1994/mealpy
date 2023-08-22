@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 10:55, 02/12/2019 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -8,22 +8,21 @@ import numpy as np
 from mealpy.optimizer import Optimizer
 
 
-class BaseSHO(Optimizer):
+class OriginalSHO(Optimizer):
     """
-    My changed version of: Spotted Hyena Optimizer (SHO)
+    The original version of: Spotted Hyena Optimizer (SHO)
 
     Links:
         1. https://doi.org/10.1016/j.advengsoft.2017.05.014
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + h_factor (float): default = 5, coefficient linearly decreased from 5 to 0
-        + rand_v (list, tuple): (uniform min, uniform max), random vector, default = [0.5, 1]
-        + N_tried (int): default = 10,
+        + N_tried (int): default = 10
 
     Examples
     ~~~~~~~~
     >>> import numpy as np
-    >>> from mealpy.swarm_based.SHO import BaseSHO
+    >>> from mealpy.swarm_based.SHO import OriginalSHO
     >>>
     >>> def fitness_function(solution):
     >>>     return np.sum(solution**2)
@@ -37,11 +36,10 @@ class BaseSHO(Optimizer):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> h_factor = 5
-    >>> rand_v = [0.5, 1]
+    >>> h_factor = 5.0
     >>> N_tried = 10
-    >>> model = BaseSHO(problem_dict1, epoch, pop_size, h_factor, rand_v, N_tried)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalSHO(epoch, pop_size, h_factor, N_tried)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -50,24 +48,20 @@ class BaseSHO(Optimizer):
     technique for engineering applications. Advances in Engineering Software, 114, pp.48-70.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, h_factor=5, rand_v=(0.5, 1), N_tried=10, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, h_factor=5., N_tried=10, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
-            h_factor (float): default = 5, coefficient linearly decreased from 5 to 0
-            rand_v (list, tuple): (uniform min, uniform max), random vector, default = [0.5, 1]
+            h_factor (float): default = 5, coefficient linearly decreased from 5.0 to 0
             N_tried (int): default = 10,
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.h_factor = self.validator.check_float("h_factor", h_factor, (0.5, 10.0))
-        self.rand_v = self.validator.check_tuple_float("rand_v", rand_v, ([-10, 0], [0, 10]))
         self.N_tried = self.validator.check_int("N_tried", N_tried, (1, float("inf")))
-
-        self.nfe_per_epoch = self.pop_size
+        self.set_parameters(["epoch", "pop_size", "h_factor", "N_tried"])
         self.sort_flag = False
 
     def evolve(self, epoch):
@@ -77,7 +71,6 @@ class BaseSHO(Optimizer):
         Args:
             epoch (int): The current iteration
         """
-        nfe_epoch = 0
         pop_new = []
         for idx in range(0, self.pop_size):
             h = self.h_factor - (epoch + 1.0) * (self.h_factor / self.epoch)
@@ -92,13 +85,12 @@ class BaseSHO(Optimizer):
             else:
                 N = 1
                 for i in range(0, self.N_tried):
-                    pos_temp = self.g_best[self.ID_POS] + np.random.uniform(self.rand_v[0], self.rand_v[1]) * \
+                    pos_temp = self.g_best[self.ID_POS] + np.random.normal(0, 1, self.problem.n_dims) * \
                               np.random.uniform(self.problem.lb, self.problem.ub)
                     pos_temp = self.amend_position(pos_temp, self.problem.lb, self.problem.ub)
                     target = self.get_target_wrapper(pos_temp)
                     if self.compare_agent([pos_temp, target], self.g_best):
                         N += 1
-                        nfe_epoch += 1
                         break
                     N += 1
                 circle_list = []
@@ -110,7 +102,9 @@ class BaseSHO(Optimizer):
                 pos_new = np.mean(np.array(circle_list), axis=0)
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        pop_new = self.update_target_wrapper_population(pop_new)
-        self.pop = self.greedy_selection_population(self.pop, pop_new)
-        nfe_epoch += self.pop_size
-        self.nfe_per_epoch = nfe_epoch
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                self.pop[idx] = self.get_better_solution(self.pop[idx], [pos_new, target])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            self.pop = self.greedy_selection_population(self.pop, pop_new)

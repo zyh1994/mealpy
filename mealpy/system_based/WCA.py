@@ -1,15 +1,14 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 09:55, 02/03/2021 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
 # --------------------------------------------------%
 
 import numpy as np
-from copy import deepcopy
 from mealpy.optimizer import Optimizer
 
 
-class BaseWCA(Optimizer):
+class OriginalWCA(Optimizer):
     """
     The original version of: Water Cycle Algorithm (WCA)
 
@@ -23,7 +22,7 @@ class BaseWCA(Optimizer):
         + a few river which are second, third, ...
         + other left are stream (will flow directed to sea or river)
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + nsr (int): [4, 10], Number of rivers + sea (sea = 1), default = 4
         + wc (float): [1.0, 3.0], Weighting coefficient (C in the paper), default = 2
         + dmax (float): [1e-6], fixed parameter, Evaporation condition constant, default=1e-6
@@ -31,7 +30,7 @@ class BaseWCA(Optimizer):
     Examples
     ~~~~~~~~
     >>> import numpy as np
-    >>> from mealpy.system_based.WCA import BaseWCA
+    >>> from mealpy.system_based.WCA import OriginalWCA
     >>>
     >>> def fitness_function(solution):
     >>>     return np.sum(solution**2)
@@ -48,8 +47,8 @@ class BaseWCA(Optimizer):
     >>> nsr = 4
     >>> wc = 2.0
     >>> dmax = 1e-6
-    >>> model = BaseWCA(problem_dict1, epoch, pop_size, nsr, wc, dmax)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalWCA(epoch, pop_size, nsr, wc, dmax)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -58,35 +57,33 @@ class BaseWCA(Optimizer):
     optimization method for solving constrained engineering optimization problems. Computers & Structures, 110, pp.151-166.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, nsr=4, wc=2.0, dmax=1e-6, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, nsr=4, wc=2.0, dmax=1e-6, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             nsr (int): Number of rivers + sea (sea = 1), default = 4
             wc (float): Weighting coefficient (C in the paper), default = 2.0
             dmax (float): Evaporation condition constant, default=1e-6
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.nsr = self.validator.check_int("nsr", nsr, [2, int(self.pop_size/2)])
         self.wc = self.validator.check_float("wc", wc, (1.0, 3.0))
         self.dmax = self.validator.check_float("dmax", dmax, (0, 1.0))
-        self.streams, self.pop_bset, self.pop_stream = None, None, None
-        self.nfe_per_epoch = self.pop_size
-        self.sort_flag = False
+        self.set_parameters(["epoch", "pop_size", "nsr", "wc", "dmax"])
+        self.sort_flag = True
 
     def initialization(self):
-        pop = self.create_population(self.pop_size)
-        self.pop, self.g_best = self.get_global_best_solution(pop)  # We sort the population
-
+        if self.pop is None:
+            self.pop = self.create_population(self.pop_size)
+        self.pop, self.g_best = self.get_global_best_solution(self.pop)
         self.ecc = self.dmax  # Evaporation condition constant - variable
         n_stream = self.pop_size - self.nsr
-        g_best = deepcopy(pop[0])  # Global best solution (sea)
-        self.pop_best = deepcopy(pop[:self.nsr])  # Including sea and river (1st solution is sea)
-        self.pop_stream = deepcopy(pop[self.nsr:])  # Forming Stream
+        g_best = self.pop[0].copy()  # Global best solution (sea)
+        self.pop_best = self.pop[:self.nsr]  # Including sea and river (1st solution is sea)
+        self.pop_stream = self.pop[self.nsr:] # Forming Stream
 
         # Designate streams to rivers and sea
         cost_river_list = np.array([solution[self.ID_TAR][self.ID_FIT] for solution in self.pop_best])
@@ -122,11 +119,13 @@ class BaseWCA(Optimizer):
                 pos_new = stream[self.ID_POS] + np.random.uniform() * self.wc * (self.pop_best[idx][self.ID_POS] - stream[self.ID_POS])
                 pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
                 stream_new.append([pos_new, None])
+                if self.mode not in self.AVAILABLE_MODES:
+                    stream_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
             stream_new = self.update_target_wrapper_population(stream_new)
             stream_new, stream_best = self.get_global_best_solution(stream_new)
             self.streams[idx] = stream_new
             if self.compare_agent(stream_best, self.pop_best[idx]):
-                self.pop_best[idx] = deepcopy(stream_best)
+                self.pop_best[idx] = stream_best.copy()
 
             # Update river
             pos_new = self.pop_best[idx][self.ID_POS] + np.random.uniform() * self.wc * (self.g_best[self.ID_POS] - self.pop_best[idx][self.ID_POS])
@@ -143,10 +142,8 @@ class BaseWCA(Optimizer):
                 pop_current_best, _ = self.get_global_best_solution(self.streams[i] + [child])
                 self.pop_best[i] = pop_current_best.pop(0)
                 self.streams[i] = pop_current_best
-
-        self.pop = deepcopy(self.pop_best)
+        self.pop = self.pop_best.copy()
         for idx, stream_list in self.streams.items():
             self.pop += stream_list
-
         # Reduce the ecc
         self.ecc = self.ecc - self.ecc / self.epoch

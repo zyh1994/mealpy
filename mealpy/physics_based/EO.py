@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 07:03, 18/03/2020 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -8,7 +8,7 @@ import numpy as np
 from mealpy.optimizer import Optimizer
 
 
-class BaseEO(Optimizer):
+class OriginalEO(Optimizer):
     """
     The original version of: Equilibrium Optimizer (EO)
 
@@ -19,7 +19,7 @@ class BaseEO(Optimizer):
     Examples
     ~~~~~~~~
     >>> import numpy as np
-    >>> from mealpy.physics_based.EO import BaseEO
+    >>> from mealpy.physics_based.EO import OriginalEO
     >>>
     >>> def fitness_function(solution):
     >>>     return np.sum(solution**2)
@@ -33,8 +33,8 @@ class BaseEO(Optimizer):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> model = BaseEO(problem_dict1, epoch, pop_size)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalEO(epoch, pop_size)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -43,18 +43,16 @@ class BaseEO(Optimizer):
     optimization algorithm. Knowledge-Based Systems, 191, p.105190.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
-
-        self.nfe_per_epoch = self.pop_size
+        self.set_parameters(["epoch", "pop_size"])
         self.sort_flag = False
         ## Fixed parameter proposed by authors
         self.V = 1
@@ -62,7 +60,7 @@ class BaseEO(Optimizer):
         self.a2 = 1
         self.GP = 0.5
 
-    def make_equilibrium_pool(self, list_equilibrium=None):
+    def make_equilibrium_pool__(self, list_equilibrium=None):
         pos_list = [item[self.ID_POS] for item in list_equilibrium]
         pos_mean = np.mean(pos_list, axis=0)
         pos_mean = self.amend_position(pos_mean, self.problem.lb, self.problem.ub)
@@ -79,7 +77,7 @@ class BaseEO(Optimizer):
         """
         # ---------------- Memory saving-------------------  make equilibrium pool
         _, c_eq_list, _ = self.get_special_solutions(self.pop, best=4)
-        c_pool = self.make_equilibrium_pool(c_eq_list)
+        c_pool = self.make_equilibrium_pool__(c_eq_list)
         # Eq. 9
         t = (1 - epoch / self.epoch) ** (self.a2 * epoch / self.epoch)
         pop_new = []
@@ -96,10 +94,15 @@ class BaseEO(Optimizer):
             pos_new = c_eq + (self.pop[idx][self.ID_POS] - c_eq) * f + (g * self.V / lamda) * (1.0 - f)  # Eq. 16
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        self.pop = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                self.pop[idx] = self.get_better_solution([pos_new, target], self.pop[idx])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            self.pop = self.greedy_selection_population(self.pop, pop_new)
 
 
-class ModifiedEO(BaseEO):
+class ModifiedEO(OriginalEO):
     """
     The original version of: Modified Equilibrium Optimizer (MEO)
 
@@ -123,8 +126,8 @@ class ModifiedEO(BaseEO):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> model = ModifiedEO(problem_dict1, epoch, pop_size)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = ModifiedEO(epoch, pop_size)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -133,15 +136,13 @@ class ModifiedEO(BaseEO):
     strategy for numerical optimization. Applied Soft Computing, 96, p.106542.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
         """
-        super().__init__(problem, epoch, pop_size, **kwargs)
-        self.nfe_per_epoch = 2 * self.pop_size
+        super().__init__(epoch, pop_size, **kwargs)
         self.sort_flag = False
         self.pop_len = int(self.pop_size / 3)
 
@@ -154,7 +155,7 @@ class ModifiedEO(BaseEO):
         """
         # ---------------- Memory saving-------------------  make equilibrium pool
         _, c_eq_list, _ = self.get_special_solutions(self.pop, best=4)
-        c_pool = self.make_equilibrium_pool(c_eq_list)
+        c_pool = self.make_equilibrium_pool__(c_eq_list)
 
         # Eq. 9
         t = (1 - epoch / self.epoch) ** (self.a2 * epoch / self.epoch)
@@ -173,18 +174,29 @@ class ModifiedEO(BaseEO):
             pos_new = c_eq + (self.pop[idx][self.ID_POS] - c_eq) * f + (g * self.V / lamda) * (1.0 - f)  # Eq. 16
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        pop_new = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                self.pop[idx] = self.get_better_solution([pos_new, target], self.pop[idx])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            self.pop = self.greedy_selection_population(self.pop, pop_new)
 
         ## Sort the updated population based on fitness
-        _, pop_s1, _ = self.get_special_solutions(pop_new, best=self.pop_len)
+        _, pop_s1, _ = self.get_special_solutions(self.pop, best=self.pop_len)
 
         ## Mutation scheme
+        pop_s2 = pop_s1.copy()
         pop_s2_new = []
         for i in range(0, self.pop_len):
-            pos_new = pop_s1[i][self.ID_POS] * (1 + np.random.normal(0, 1, self.problem.n_dims))  # Eq. 12
+            pos_new = pop_s2[i][self.ID_POS] * (1 + np.random.normal(0, 1, self.problem.n_dims))  # Eq. 12
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_s2_new.append([pos_new, None])
-        pop_s2 = self.update_target_wrapper_population(pop_s2_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                pop_s2[i] = self.get_better_solution([pos_new, target], pop_s2[i])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_s2_new = self.update_target_wrapper_population(pop_s2_new)
+            pop_s2 = self.greedy_selection_population(pop_s2_new, pop_s2)
 
         ## Search Mechanism
         pos_s1_list = [item[self.ID_POS] for item in pop_s1]
@@ -195,8 +207,9 @@ class ModifiedEO(BaseEO):
                       (self.problem.lb + np.random.random() * (self.problem.ub - self.problem.lb))
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_s3.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_s3[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
         pop_s3 = self.update_target_wrapper_population(pop_s3)
-
         ## Construct a new population
         self.pop = pop_s1 + pop_s2 + pop_s3
         n_left = self.pop_size - len(self.pop)
@@ -205,7 +218,7 @@ class ModifiedEO(BaseEO):
             self.pop.append(c_pool[idx_selected[i]])
 
 
-class AdaptiveEO(BaseEO):
+class AdaptiveEO(OriginalEO):
     """
     The original version of: Adaptive Equilibrium Optimization (AEO)
 
@@ -229,8 +242,8 @@ class AdaptiveEO(BaseEO):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> model = AdaptiveEO(problem_dict1, epoch, pop_size)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = AdaptiveEO(epoch, pop_size)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -240,15 +253,13 @@ class AdaptiveEO(BaseEO):
     Artificial Intelligence, 94, p.103836.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
         """
-        super().__init__(problem, epoch, pop_size, **kwargs)
-        self.nfe_per_epoch = self.pop_size
+        super().__init__(epoch, pop_size, **kwargs)
         self.sort_flag = False
         self.pop_len = int(self.pop_size / 3)
 
@@ -261,31 +272,31 @@ class AdaptiveEO(BaseEO):
         """
         # ---------------- Memory saving-------------------  make equilibrium pool
         _, c_eq_list, _ = self.get_special_solutions(self.pop, best=4)
-        c_pool = self.make_equilibrium_pool(c_eq_list)
-
+        c_pool = self.make_equilibrium_pool__(c_eq_list)
         # Eq. 9
         t = (1 - epoch / self.epoch) ** (self.a2 * epoch / self.epoch)
-
         ## Memory saving, Eq 20, 21
         t = (1 - epoch / self.epoch) ** (self.a2 * epoch / self.epoch)
-
         pop_new = []
         for idx in range(0, self.pop_size):
             lamda = np.random.uniform(0, 1, self.problem.n_dims)
             r = np.random.uniform(0, 1, self.problem.n_dims)
             c_eq = c_pool[np.random.randint(0, len(c_pool))][self.ID_POS]  # random selection 1 of candidate from the pool
             f = self.a1 * np.sign(r - 0.5) * (np.exp(-lamda * t) - 1.0)  # Eq. 14
-
             r1 = np.random.uniform()
             r2 = np.random.uniform()
             gcp = 0.5 * r1 * np.ones(self.problem.n_dims) * (r2 >= self.GP)
             g0 = gcp * (c_eq - lamda * self.pop[idx][self.ID_POS])
             g = g0 * f
-
             fit_average = np.mean([item[self.ID_TAR][self.ID_FIT] for item in self.pop])  # Eq. 19
             pos_new = c_eq + (self.pop[idx][self.ID_POS] - c_eq) * f + (g * self.V / lamda) * (1.0 - f)  # Eq. 9
             if self.pop[idx][self.ID_TAR][self.ID_FIT] >= fit_average:
                 pos_new = np.multiply(pos_new, (0.5 + np.random.uniform(0, 1, self.problem.n_dims)))
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        self.pop = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                self.pop[idx] = self.get_better_solution([pos_new, target], self.pop[idx])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            self.pop = self.greedy_selection_population(self.pop, pop_new)

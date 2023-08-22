@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 16:30, 16/11/2020 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -10,12 +10,7 @@ from mealpy.optimizer import Optimizer
 
 class BaseJA(Optimizer):
     """
-    My changed version of: Jaya Algorithm (JA)
-
-    Notes
-    ~~~~~
-    + All third loops are removed
-    + Change the second random variable r2 to Gaussian instead of Uniform
+    The developed version: Jaya Algorithm (JA)
 
     Examples
     ~~~~~~~~
@@ -34,8 +29,8 @@ class BaseJA(Optimizer):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> model = BaseJA(problem_dict1, epoch, pop_size)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = BaseJA(epoch, pop_size)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -44,17 +39,16 @@ class BaseJA(Optimizer):
     unconstrained optimization problems. International Journal of Industrial Engineering Computations, 7(1), pp.19-34.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
-        self.nfe_per_epoch = self.pop_size
+        self.set_parameters(["epoch", "pop_size"])
         self.sort_flag = False
 
     def evolve(self, epoch):
@@ -72,7 +66,12 @@ class BaseJA(Optimizer):
                       np.random.normal() * (g_worst[self.ID_POS] - np.abs(self.pop[idx][self.ID_POS]))
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        self.pop = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                self.pop[idx] = self.get_better_solution(self.pop[idx], [pos_new, target])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            self.pop = self.greedy_selection_population(self.pop, pop_new)
 
 
 class OriginalJA(BaseJA):
@@ -99,8 +98,8 @@ class OriginalJA(BaseJA):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> model = OriginalJA(problem_dict1, epoch, pop_size)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalJA(epoch, pop_size)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -109,14 +108,13 @@ class OriginalJA(BaseJA):
     unconstrained optimization problems. International Journal of Industrial Engineering Computations, 7(1), pp.19-34.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
         """
-        super().__init__(problem, epoch, pop_size, **kwargs)
+        super().__init__(epoch, pop_size, **kwargs)
 
     def evolve(self, epoch):
         """
@@ -134,7 +132,11 @@ class OriginalJA(BaseJA):
                       np.random.uniform(0, 1, self.problem.n_dims) * (g_worst[self.ID_POS] - np.abs(self.pop[idx][self.ID_POS]))
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        self.pop = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[idx][self.ID_TAR] = self.get_target_wrapper(pos_new)
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+        self.pop = pop_new
 
 
 class LevyJA(BaseJA):
@@ -166,8 +168,8 @@ class LevyJA(BaseJA):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> model = LevyJA(problem_dict1, epoch, pop_size)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = LevyJA(epoch, pop_size)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -176,15 +178,13 @@ class LevyJA(BaseJA):
     algorithm with Lévy flight. Expert Systems with Applications, 165, p.113902.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
         """
-        super().__init__(problem, epoch, pop_size, **kwargs)
-        self.nfe_per_epoch = pop_size
+        super().__init__(epoch, pop_size, **kwargs)
         self.sort_flag = False
 
     def evolve(self, epoch):
@@ -198,10 +198,15 @@ class LevyJA(BaseJA):
         g_best, g_worst = best[0], worst[0]
         pop_new = []
         for idx in range(0, self.pop_size):
-            L1 = self.get_levy_flight_step(multiplier=1.0, beta=1.0, case=-1)
-            L2 = self.get_levy_flight_step(multiplier=1.0, beta=1.0, case=-1)
+            L1 = self.get_levy_flight_step(multiplier=1.0, beta=1.8, case=-1)
+            L2 = self.get_levy_flight_step(multiplier=1.0, beta=1.8, case=-1)
             pos_new = self.pop[idx][self.ID_POS] + np.abs(L1) * (g_best[self.ID_POS] - np.abs(self.pop[idx][self.ID_POS])) - \
                       np.abs(L2) * (g_worst[self.ID_POS] - np.abs(self.pop[idx][self.ID_POS]))
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        self.pop = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                self.pop[idx] = self.get_better_solution(self.pop[idx], [pos_new, target])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            self.pop = self.greedy_selection_population(self.pop, pop_new)

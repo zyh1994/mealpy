@@ -6,7 +6,6 @@
 
 import numpy as np
 from scipy.stats import qmc
-from copy import deepcopy
 from mealpy.optimizer import Optimizer
 
 
@@ -18,7 +17,7 @@ class OriginalPSS(Optimizer):
         1. https://doi.org/10.1007/s00500-021-05853-8
         2. https://github.com/eesd-epfl/pareto-optimizer
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + acceptance_rate (float): [0.7-0.96], the probability of accepting a solution in the normal range, default=0.9
         + sampling_method (str): 'LHS': Latin-Hypercube or 'MC': 'MonteCarlo', default="LHS"
 
@@ -41,8 +40,8 @@ class OriginalPSS(Optimizer):
     >>> pop_size = 50
     >>> acceptance_rate = 0.8
     >>> sampling_method = "LHS"
-    >>> model = OriginalPSS(problem_dict1, epoch, pop_size, acceptance_rate, sampling_method)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalPSS(epoch, pop_size, acceptance_rate, sampling_method)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -50,23 +49,23 @@ class OriginalPSS(Optimizer):
     [1] Shaqfa, M. and Beyer, K., 2021. Pareto-like sequential sampling heuristic for global optimisation. Soft Computing, 25(14), pp.9077-9096.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, acceptance_rate=0.9, sampling_method="LHS", **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, acceptance_rate=0.9, sampling_method="LHS", **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             acceptance_rate (float): the probability of accepting a solution in the normal range, default = 0.9
             sampling_method (str): 'LHS': Latin-Hypercube or 'MC': 'MonteCarlo', default = "LHS"
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.acceptance_rate = self.validator.check_float("acceptance_rate", acceptance_rate, (0, 1.0))
         self.sampling_method = self.validator.check_str("sampling_method", sampling_method, ["MC", "LHS"])
-
-        self.nfe_per_epoch = self.pop_size
+        self.set_parameters(["epoch", "pop_size", "acceptance_rate", "sampling_method"])
         self.sort_flag = False
+
+    def initialize_variables(self):
         self.step = 10e-10
         self.steps = np.ones(self.problem.n_dims) * self.step
         self.new_solution = True
@@ -86,9 +85,11 @@ class OriginalPSS(Optimizer):
 
         random_pop = self.create_population(self.pop_size)
         pop = np.round((lb_pop + random_pop * (ub_pop - lb_pop)) / steps_mat) * steps_mat
-        pop = [[self.amend_position(position, self.problem.lb, self.problem.ub), None] for position in pop]
-        self.pop = self.update_target_wrapper_population(pop)
-        _, self.g_best = self.get_global_best_solution(self.pop)
+        self.pop = []
+        for pos in pop:
+            pos_new = self.amend_position(pos, self.problem.lb, self.problem.ub)
+            target = self.get_target_wrapper(pos_new)
+            self.pop.append([pos_new, target])
 
     def evolve(self, epoch):
         """
@@ -100,7 +101,7 @@ class OriginalPSS(Optimizer):
         pop_new = []
         pop_rand = self.create_population(self.pop_size)
         for idx in range(0, self.pop_size):
-            pos_new = deepcopy(self.pop[idx][self.ID_POS]).astype(float)
+            pos_new = self.pop[idx][self.ID_POS].copy().astype(float)
             for k in range(self.problem.n_dims):
                 # Update the ranges
                 deviation = np.random.uniform(0, self.g_best[self.ID_POS][k])
@@ -127,7 +128,10 @@ class OriginalPSS(Optimizer):
             # Check the bound
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        self.pop = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
+        pop_new = self.update_target_wrapper_population(pop_new)
+        self.pop = pop_new
         _, current_best = self.get_global_best_solution(pop_new)
         if self.compare_agent(current_best, self.g_best):
             self.new_solution = True

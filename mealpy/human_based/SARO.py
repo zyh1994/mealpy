@@ -1,25 +1,20 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 11:16, 18/03/2020 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
 # --------------------------------------------------%
 
 import numpy as np
-from copy import deepcopy
 from mealpy.optimizer import Optimizer
 
 
 class BaseSARO(Optimizer):
     """
-    My changed version of: Search And Rescue Optimization (SARO)
+    The developed version: Search And Rescue Optimization (SARO)
 
-    Notes
-    ~~~~~
-    All third loop is removed
-
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + se (float): [0.3, 0.8], social effect, default = 0.5
-        + mu (int): [10, 100], maximum unsuccessful search number, default = 50
+        + mu (int): maximum unsuccessful search number, belongs to range: [2, 2+int(self.pop_size/2)], default = 15
 
     Examples
     ~~~~~~~~
@@ -40,49 +35,40 @@ class BaseSARO(Optimizer):
     >>> pop_size = 50
     >>> se = 0.5
     >>> mu = 50
-    >>> model = BaseSARO(problem_dict1, epoch, pop_size, se, mu)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = BaseSARO(epoch, pop_size, se, mu)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, se=0.5, mu=50, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, se=0.5, mu=15, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             se (float): social effect, default = 0.5
-            mu (int): maximum unsuccessful search number, default = 50
+            mu (int): maximum unsuccessful search number, default = 15
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.se = self.validator.check_float("se", se, (0, 1.0))
         self.mu = self.validator.check_int("mu", mu, [2, 2+int(self.pop_size/2)])
-
-        self.nfe_per_epoch = 2 * self.pop_size
+        self.set_parameters(["epoch", "pop_size", "se", "mu"])
         self.sort_flag = True
-        ## Dynamic variable
+
+    def initialize_variables(self):
         self.dyn_USN = np.zeros(self.pop_size)
 
     def initialization(self):
-        pop = self.create_population(pop_size=(2 * self.pop_size))
-        self.pop, self.g_best = self.get_global_best_solution(pop)
+        if self.pop is None:
+            self.pop = self.create_population(2 * self.pop_size)
+        else:
+            self.pop = self.pop + self.create_population(self.pop_size)
 
-    def amend_position(self, position=None, lb=None, ub=None):
-        """
-        Depend on what kind of problem are we trying to solve, there will be an different amend_position
-        function to rebound the position of agent into the valid range.
-
-        Args:
-            position: vector position (location) of the solution.
-            lb: list of lower bound values
-            ub: list of upper bound values
-
-        Returns:
-            Amended position (make the position is in bound)
-        """
-        return np.where(np.logical_and(lb <= position, position <= ub), position, np.random.uniform(lb, ub))
+    def bounded_position(self, position=None, lb=None, ub=None):
+        condition = np.logical_and(lb <= position, position <= ub)
+        rand_pos = np.random.uniform(lb, ub)
+        return np.where(condition, position, rand_pos)
 
     def evolve(self, epoch):
         """
@@ -91,8 +77,8 @@ class BaseSARO(Optimizer):
         Args:
             epoch (int): The current iteration
         """
-        pop_x = deepcopy(self.pop[:self.pop_size])
-        pop_m = deepcopy(self.pop[self.pop_size:])
+        pop_x = self.pop[:self.pop_size].copy()
+        pop_m = self.pop[self.pop_size:].copy()
 
         pop_new = []
         for idx in range(self.pop_size):
@@ -107,16 +93,18 @@ class BaseSARO(Optimizer):
                                               self.pop[k][self.ID_TAR] < pop_x[idx][self.ID_TAR]), pos_new_1, pos_new_2)
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
         pop_new = self.update_target_wrapper_population(pop_new)
         for idx in range(self.pop_size):
             if self.compare_agent(pop_new[idx], pop_x[idx]):
-                pop_m[np.random.randint(0, self.pop_size)] = deepcopy(pop_x[idx])
-                pop_x[idx] = deepcopy(pop_new[idx])
+                pop_m[np.random.randint(0, self.pop_size)] = pop_x[idx].copy()
+                pop_x[idx] = pop_new[idx].copy()
                 self.dyn_USN[idx] = 0
             else:
                 self.dyn_USN[idx] += 1
 
-        pop = deepcopy(pop_x) + deepcopy(pop_m)
+        pop = pop_x.copy() + pop_m.copy()
         pop_new = []
         for idx in range(self.pop_size):
             ## Individual phase
@@ -125,11 +113,13 @@ class BaseSARO(Optimizer):
             pos_new = self.g_best[self.ID_POS] + np.random.uniform() * (pop[k1][self.ID_POS] - pop[k2][self.ID_POS])
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
         pop_new = self.update_target_wrapper_population(pop_new)
         for idx in range(0, self.pop_size):
             if self.compare_agent(pop_new[idx], pop_x[idx]):
-                pop_m[np.random.randint(0, self.pop_size)] = deepcopy(pop_x[idx])
-                pop_x[idx] = deepcopy(pop_new[idx])
+                pop_m[np.random.randint(0, self.pop_size)] = pop_x[idx].copy()
+                pop_x[idx] = pop_new[idx].copy()
                 self.dyn_USN[idx] = 0
             else:
                 self.dyn_USN[idx] += 1
@@ -147,9 +137,9 @@ class OriginalSARO(BaseSARO):
     Links:
        1. https://doi.org/10.1155/2019/2482543
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + se (float): [0.3, 0.8], social effect, default = 0.5
-        + mu (int): [10, 100], maximum unsuccessful search number, default = 50
+        + mu (int): [10, 20], maximum unsuccessful search number, default = 15
 
     Examples
     ~~~~~~~~
@@ -170,8 +160,8 @@ class OriginalSARO(BaseSARO):
     >>> pop_size = 50
     >>> se = 0.5
     >>> mu = 50
-    >>> model = OriginalSARO(problem_dict1, epoch, pop_size, se, mu)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalSARO(epoch, pop_size, se, mu)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -180,16 +170,15 @@ class OriginalSARO(BaseSARO):
     algorithm based on search and rescue operations. Mathematical Problems in Engineering, 2019.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, se=0.5, mu=50, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, se=0.5, mu=15, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             se (float): social effect, default = 0.5
-            mu (int): maximum unsuccessful search number, default = 50
+            mu (int): maximum unsuccessful search number, default = 15
         """
-        super().__init__(problem, epoch, pop_size, se, mu, **kwargs)
+        super().__init__(epoch, pop_size, se, mu, **kwargs)
 
     def evolve(self, epoch):
         """
@@ -198,8 +187,8 @@ class OriginalSARO(BaseSARO):
         Args:
             epoch (int): The current iteration
         """
-        pop_x = deepcopy(self.pop[:self.pop_size])
-        pop_m = deepcopy(self.pop[self.pop_size:])
+        pop_x = self.pop[:self.pop_size].copy()
+        pop_m = self.pop[self.pop_size:].copy()
 
         pop_new = []
         for idx in range(self.pop_size):
@@ -209,31 +198,32 @@ class OriginalSARO(BaseSARO):
             j_rand = np.random.randint(0, self.problem.n_dims)
             r1 = np.random.uniform(-1, 1)
 
-            pos_new = deepcopy(pop_x[idx][self.ID_POS])
+            pos_new = pop_x[idx][self.ID_POS].copy()
             for j in range(0, self.problem.n_dims):
                 if np.random.uniform() < self.se or j == j_rand:
                     if self.compare_agent(self.pop[k], pop_x[idx]):
                         pos_new[j] = self.pop[k][self.ID_POS][j] + r1 * sd[j]
                     else:
                         pos_new[j] = pop_x[idx][self.ID_POS][j] + r1 * sd[j]
-
                 if pos_new[j] < self.problem.lb[j]:
                     pos_new[j] = (pop_x[idx][self.ID_POS][j] + self.problem.lb[j]) / 2
                 if pos_new[j] > self.problem.ub[j]:
                     pos_new[j] = (pop_x[idx][self.ID_POS][j] + self.problem.ub[j]) / 2
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
         pop_new = self.update_target_wrapper_population(pop_new)
         for idx in range(0, self.pop_size):
             if self.compare_agent(pop_new[idx], pop_x[idx]):
-                pop_m[np.random.randint(0, self.pop_size)] = deepcopy(pop_x[idx])
-                pop_x[idx] = deepcopy(pop_new[idx])
+                pop_m[np.random.randint(0, self.pop_size)] = pop_x[idx].copy()
+                pop_x[idx] = pop_new[idx].copy()
                 self.dyn_USN[idx] = 0
             else:
                 self.dyn_USN[idx] += 1
 
         ## Individual phase
-        pop = deepcopy(pop_x) + deepcopy(pop_m)
+        pop = pop_x.copy() + pop_m.copy()
         pop_new = []
         for idx in range(0, self.pop_size):
             k, m = np.random.choice(list(set(range(0, 2 * self.pop_size)) - {idx}), 2, replace=False)
@@ -245,11 +235,13 @@ class OriginalSARO(BaseSARO):
                     pos_new[j] = (pop_x[idx][self.ID_POS][j] + self.problem.ub[j]) / 2
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
         pop_new = self.update_target_wrapper_population(pop_new)
         for idx in range(0, self.pop_size):
             if self.compare_agent(pop_new[idx], pop_x[idx]):
                 pop_m[np.random.randint(0, self.pop_size)] = pop_x[idx]
-                pop_x[idx] = deepcopy(pop_new[idx])
+                pop_x[idx] = pop_new[idx].copy()
                 self.dyn_USN[idx] = 0
             else:
                 self.dyn_USN[idx] += 1

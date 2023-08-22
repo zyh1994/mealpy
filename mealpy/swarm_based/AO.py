@@ -1,11 +1,10 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 15:53, 07/07/2021 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
 # --------------------------------------------------%
 
 import numpy as np
-from math import gamma
 from mealpy.optimizer import Optimizer
 
 
@@ -33,8 +32,8 @@ class OriginalAO(Optimizer):
     >>>
     >>> epoch = 1000
     >>> pop_size = 50
-    >>> model = OriginalAO(problem_dict1, epoch, pop_size)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalAO(epoch, pop_size)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -43,28 +42,17 @@ class OriginalAO(Optimizer):
     Aquila optimizer: a novel meta-heuristic optimization algorithm. Computers & Industrial Engineering, 157, p.107250.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
-        self.alpha = 0.1
-        self.delta = 0.1
-        self.nfe_per_epoch = self.pop_size
+        self.set_parameters(["epoch", "pop_size"])
         self.sort_flag = False
-
-    def get_simple_levy_step(self):
-        beta = 1.5
-        sigma = (gamma(1 + beta) * np.sin(np.pi * beta / 2) / (gamma((1 + beta) / 2) * beta * 2 ** ((beta - 1) / 2))) ** (1 / beta)
-        u = np.random.normal(0, 1, self.problem.n_dims) * sigma
-        v = np.random.normal(1, self.problem.n_dims)
-        step = u / abs(v) ** (1 / beta)
-        return step
 
     def evolve(self, epoch):
         """
@@ -73,6 +61,7 @@ class OriginalAO(Optimizer):
         Args:
             epoch (int): The current iteration
         """
+        alpha = delta = 0.1
         g1 = 2 * np.random.rand() - 1  # Eq. 16
         g2 = 2 * (1 - epoch / self.epoch)  # Eq. 17
 
@@ -90,22 +79,26 @@ class OriginalAO(Optimizer):
         pop_new = []
         for idx in range(0, self.pop_size):
             x_mean = np.mean(np.array([item[self.ID_TAR][self.ID_FIT] for item in self.pop]), axis=0)
+            levy_step = self.get_levy_flight_step(beta=1.5, multiplier=1.0, case=-1)
             if (epoch + 1) <= (2 / 3) * self.epoch:  # Eq. 3, 4
                 if np.random.rand() < 0.5:
                     pos_new = self.g_best[self.ID_POS] * (1 - (epoch + 1) / self.epoch) + \
                               np.random.rand() * (x_mean - self.g_best[self.ID_POS])
                 else:
                     idx = np.random.choice(list(set(range(0, self.pop_size)) - {idx}))
-                    pos_new = self.g_best[self.ID_POS] * self.get_simple_levy_step() + \
-                              self.pop[idx][self.ID_POS] + np.random.rand() * (y - x)  # Eq. 5
+                    pos_new = self.g_best[self.ID_POS] * levy_step + self.pop[idx][self.ID_POS] + np.random.rand() * (y - x)  # Eq. 5
             else:
                 if np.random.rand() < 0.5:
-                    pos_new = self.alpha * (self.g_best[self.ID_POS] - x_mean) - np.random.rand() * \
-                              (np.random.rand() * (self.problem.ub - self.problem.lb) + self.problem.lb) * self.delta  # Eq. 13
+                    pos_new = alpha * (self.g_best[self.ID_POS] - x_mean) - np.random.rand() * \
+                              (np.random.rand() * (self.problem.ub - self.problem.lb) + self.problem.lb) * delta  # Eq. 13
                 else:
                     pos_new = QF * self.g_best[self.ID_POS] - (g2 * self.pop[idx][self.ID_POS] * np.random.rand()) - \
-                              g2 * self.get_simple_levy_step() + np.random.rand() * g1  # Eq. 14
+                              g2 * levy_step + np.random.rand() * g1  # Eq. 14
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
-        pop_new = self.update_target_wrapper_population(pop_new)
-        self.pop = self.greedy_selection_population(self.pop, pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                self.pop[idx] = self.get_better_solution([pos_new, target], self.pop[idx])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            self.pop = self.greedy_selection_population(self.pop, pop_new)

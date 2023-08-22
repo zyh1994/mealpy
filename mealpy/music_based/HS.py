@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 17:48, 18/03/2020 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -10,7 +10,7 @@ from mealpy.optimizer import Optimizer
 
 class BaseHS(Optimizer):
     """
-    My changed version of: Harmony Search (HS)
+    The developed version: Harmony Search (HS)
 
     Links:
         1. https://doi.org/10.1177/003754970107600201
@@ -18,9 +18,9 @@ class BaseHS(Optimizer):
     Notes
     ~~~~~
     - Used the global best in the harmony memories
-    - Removed third for loop
+    - Removed all third for loops
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + c_r (float): [0.1, 0.5], Harmony Memory Consideration Rate), default = 0.15
         + pa_r (float): [0.3, 0.8], Pitch Adjustment Rate, default=0.5
 
@@ -43,28 +43,28 @@ class BaseHS(Optimizer):
     >>> pop_size = 50
     >>> c_r = 0.95
     >>> pa_r = 0.05
-    >>> model = BaseHS(problem_dict1, epoch, pop_size, c_r, pa_r)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = BaseHS(epoch, pop_size, c_r, pa_r)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, c_r=0.95, pa_r=0.05, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, c_r=0.95, pa_r=0.05, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             c_r (float): Harmony Memory Consideration Rate, default = 0.15
             pa_r (float): Pitch Adjustment Rate, default=0.5
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.c_r = self.validator.check_float("c_r", c_r, (0, 1.0))
         self.pa_r = self.validator.check_float("pa_r", pa_r, (0, 1.0))
-
-        self.nfe_per_epoch = self.pop_size
+        self.set_parameters(["epoch", "pop_size", "c_r", "pa_r"])
         self.sort_flag = False
+
+    def initialize_variables(self):
         self.fw = 0.0001 * (self.problem.ub - self.problem.lb)  # Fret Width (Bandwidth)
         self.fw_damp = 0.9995  # Fret Width Damp Ratio
         self.dyn_fw = self.fw
@@ -83,12 +83,14 @@ class BaseHS(Optimizer):
             delta = self.dyn_fw * np.random.normal(self.problem.lb, self.problem.ub)
 
             # Use Harmony Memory
-            pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < self.c_r, self.g_best[self.ID_POS], pos_new)
+            pos_new = np.where(np.random.random(self.problem.n_dims) < self.c_r, self.g_best[self.ID_POS], pos_new)
             # Pitch Adjustment
             x_new = pos_new + delta
-            pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < self.pa_r, x_new, pos_new)
+            pos_new = np.where(np.random.random(self.problem.n_dims) < self.pa_r, x_new, pos_new)
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
         pop_new = self.update_target_wrapper_population(pop_new)
 
         # Update Damp Fret Width
@@ -105,7 +107,7 @@ class OriginalHS(BaseHS):
     Links:
         1. https://doi.org/10.1177/003754970107600201
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + c_r (float): [0.1, 0.5], Harmony Memory Consideration Rate), default = 0.15
         + pa_r (float): [0.3, 0.8], Pitch Adjustment Rate, default=0.5
 
@@ -129,8 +131,8 @@ class OriginalHS(BaseHS):
     >>> pop_size = 50
     >>> c_r = 0.95
     >>> pa_r = 0.05
-    >>> model = OriginalHS(problem_dict1, epoch, pop_size, c_r, pa_r)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalHS(epoch, pop_size, c_r, pa_r)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -139,18 +141,15 @@ class OriginalHS(BaseHS):
     optimization algorithm: harmony search. simulation, 76(2), pp.60-68.
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, c_r=0.95, pa_r=0.05, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, c_r=0.95, pa_r=0.05, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             c_r (float): Harmony Memory Consideration Rate), default = 0.15
             pa_r (float): Pitch Adjustment Rate, default=0.5
         """
-        super().__init__(problem, epoch, pop_size, c_r, pa_r, **kwargs)
-        self.nfe_per_epoch = self.pop_size
-        self.sort_flag = False
+        super().__init__(epoch, pop_size, c_r, pa_r, **kwargs)
 
     def evolve(self, epoch):
         """
@@ -173,6 +172,8 @@ class OriginalHS(BaseHS):
                     pos_new[j] = pos_new[j] + delta[j]
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
         pop_new = self.update_target_wrapper_population(pop_new)
 
         # Update Damp Fret Width

@@ -1,11 +1,10 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 19:24, 09/05/2020 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
 # --------------------------------------------------%
 
 import numpy as np
-from copy import deepcopy
 from mealpy.optimizer import Optimizer
 
 
@@ -16,7 +15,7 @@ class OriginalCHIO(Optimizer):
     Links:
         1. https://link.springer.com/article/10.1007/s00521-020-05296-6
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + brr (float): [0.05, 0.2], Basic reproduction rate, default=0.15
         + max_age (int): [5, 20], Maximum infected cases age, default=10
 
@@ -39,8 +38,8 @@ class OriginalCHIO(Optimizer):
     >>> pop_size = 50
     >>> brr = 0.15
     >>> max_age = 10
-    >>> model = OriginalCHIO(problem_dict1, epoch, pop_size, brr, max_age)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalCHIO(epoch, pop_size, brr, max_age)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -49,27 +48,22 @@ class OriginalCHIO(Optimizer):
     Neural Comput & Applic 33, 5011–5042 (2021). https://doi.org/10.1007/s00521-020-05296-6
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, brr=0.15, max_age=10, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, brr=0.15, max_age=10, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             brr (float): Basic reproduction rate, default=0.15
             max_age (int): Maximum infected cases age, default=10
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.brr = self.validator.check_float("brr", brr, (0, 1.0))
         self.max_age = self.validator.check_int("max_age", max_age, [1, 1+int(epoch/5)])
-        self.nfe_per_epoch = self.pop_size
-        self.sort_flag = False
+        self.set_parameters(["epoch", "pop_size", "brr", "max_age"])
 
-    def initialization(self):
-        self.pop = self.create_population(self.pop_size)
-        _, self.g_best = self.get_global_best_solution(self.pop)
-
+    def initialize_variables(self):
         self.immunity_type_list = np.random.randint(0, 3, self.pop_size)  # Randint [0, 1, 2]
         self.age_list = np.zeros(self.pop_size)  # Control the age of each position
         self.finished = False
@@ -84,7 +78,7 @@ class OriginalCHIO(Optimizer):
         pop_new = []
         is_corona_list = [False, ] * self.pop_size
         for i in range(0, self.pop_size):
-            pos_new = deepcopy(self.pop[i][self.ID_POS])
+            pos_new = self.pop[i][self.ID_POS].copy()
             for j in range(0, self.problem.n_dims):
                 rand = np.random.uniform()
                 if rand < (1.0 / 3) * self.brr:
@@ -112,15 +106,17 @@ class OriginalCHIO(Optimizer):
                 break
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
+        pop_new = self.update_target_wrapper_population(pop_new)
         if len(pop_new) != self.pop_size:
             pop_child = self.create_population(self.pop_size - len(pop_new))
             pop_new = pop_new + pop_child
-        pop_new = self.update_target_wrapper_population(pop_new)
 
         for idx in range(0, self.pop_size):
             # Step 4: Update herd immunity population
             if self.compare_agent(pop_new[idx], self.pop[idx]):
-                self.pop[idx] = deepcopy(pop_new[idx])
+                self.pop[idx] = pop_new[idx].copy()
             else:
                 self.age_list[idx] += 1
 
@@ -142,9 +138,9 @@ class OriginalCHIO(Optimizer):
 
 class BaseCHIO(OriginalCHIO):
     """
-    My changed version of: Coronavirus Herd Immunity Optimization (CHIO)
+    The developed version of: Coronavirus Herd Immunity Optimization (CHIO)
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
         + brr (float): [0.05, 0.2], Basic reproduction rate, default=0.15
         + max_age (int): [5, 20], Maximum infected cases age, default=10
 
@@ -167,21 +163,20 @@ class BaseCHIO(OriginalCHIO):
     >>> pop_size = 50
     >>> brr = 0.15
     >>> max_age = 10
-    >>> model = BaseCHIO(problem_dict1, epoch, pop_size, brr, max_age)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = BaseCHIO(epoch, pop_size, brr, max_age)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
 
-    def __init__(self, problem, epoch=10000, pop_size=100, brr=0.15, max_age=10, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, brr=0.15, max_age=10, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             brr (float): Basic reproduction rate, default=0.15
             max_age (int): Maximum infected cases age, default=10
         """
-        super().__init__(problem, epoch, pop_size, brr, max_age, **kwargs)
+        super().__init__(epoch, pop_size, brr, max_age, **kwargs)
 
     def evolve(self, epoch):
         """
@@ -193,7 +188,7 @@ class BaseCHIO(OriginalCHIO):
         pop_new = []
         is_corona_list = [False, ] * self.pop_size
         for i in range(0, self.pop_size):
-            pos_new = deepcopy(self.pop[i][self.ID_POS])
+            pos_new = self.pop[i][self.ID_POS].copy()
             for j in range(0, self.problem.n_dims):
                 rand = np.random.uniform()
                 if rand < (1.0 / 3) * self.brr:
@@ -225,12 +220,14 @@ class BaseCHIO(OriginalCHIO):
                 break
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None])
+            if self.mode not in self.AVAILABLE_MODES:
+                pop_new[-1][self.ID_TAR] = self.get_target_wrapper(pos_new)
         pop_new = self.update_target_wrapper_population(pop_new)
 
         for idx in range(0, self.pop_size):
             # Step 4: Update herd immunity population
             if self.compare_agent(pop_new[idx], self.pop[idx]):
-                self.pop[idx] = deepcopy(pop_new[idx])
+                self.pop[idx] = pop_new[idx].copy()
             else:
                 self.age_list[idx] += 1
 

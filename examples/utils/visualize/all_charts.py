@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 10:11, 16/03/2020 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -29,8 +29,8 @@ problem = {
 }
 
 ## Run the algorithm
-model = SMA.BaseSMA(problem, epoch=100, pop_size=50)
-best_position, best_fitness = model.solve()
+model = SMA.BaseSMA(epoch=100, pop_size=50)
+best_position, best_fitness = model.solve(problem)
 print(f"Best solution: {best_position}, Best fitness: {best_fitness}")
 
 export_convergence_chart(model.history.list_global_best_fit, title='Global Best Fitness')            # Draw global best fitness found so far in previous generations
@@ -47,11 +47,11 @@ export_diversity_chart([model.history.list_diversity], list_legends=['GA'])     
 
 ## Because convergence chart is formulated from objective values and weights, thus we also want to draw objective charts to understand the convergence
 # Need a little bit more pre-processing
-global_obj_list = np.array([agent[-1][-1] for agent in model.history.list_global_best])     # 2D array / matrix 2D
+global_obj_list = np.array([agent[1][1] for agent in model.history.list_global_best])     # 2D array / matrix 2D
 global_obj_list = [global_obj_list[:,idx] for idx in range(0, len(global_obj_list[0]))]     # Make each obj_list as a element in array for drawing
 export_objectives_chart(global_obj_list, title='Global Objectives Chart')
 
-current_obj_list = np.array([agent[-1][-1] for agent in model.history.list_current_best])  # 2D array / matrix 2D
+current_obj_list = np.array([agent[1][1] for agent in model.history.list_current_best])  # 2D array / matrix 2D
 current_obj_list = [current_obj_list[:, idx] for idx in range(0, len(current_obj_list[0]))]  # Make each obj_list as a element in array for drawing
 export_objectives_chart(current_obj_list, title='Local Objectives Chart')
 
@@ -73,12 +73,12 @@ export_trajectory_chart(pos_list, list_legends=list_legends, y_label=y_label)
 
 ### Or better to use the API
 ## You can access all of available figures via object "history" like this:
-model.history.save_global_objectives_chart(filename="hello/goc")
-model.history.save_local_objectives_chart(filename="hello/loc")
-model.history.save_global_best_fitness_chart(filename="hello/gbfc")
-model.history.save_local_best_fitness_chart(filename="hello/lbfc")
-model.history.save_runtime_chart(filename="hello/rtc")
-model.history.save_exploration_exploitation_chart(filename="hello/eec")
-model.history.save_diversity_chart(filename="hello/dc")
-model.history.save_trajectory_chart(list_agent_idx=[3, 5], selected_dimensions=[2], filename="hello/tc")
+model.history.save_global_objectives_chart(filename="results/goc")
+model.history.save_local_objectives_chart(filename="results/loc")
+model.history.save_global_best_fitness_chart(filename="results/gbfc")
+model.history.save_local_best_fitness_chart(filename="results/lbfc")
+model.history.save_runtime_chart(filename="results/rtc")
+model.history.save_exploration_exploitation_chart(filename="results/eec")
+model.history.save_diversity_chart(filename="results/dc")
+model.history.save_trajectory_chart(list_agent_idx=[3, 5], selected_dimensions=[2], filename="results/tc")
 

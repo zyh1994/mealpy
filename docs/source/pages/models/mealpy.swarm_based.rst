@@ -1,7 +1,7 @@
 mealpy.swarm\_based package
 ===========================
 
-mealpy.swarm\_based.ABC
+mealpy.swarm\_based.ABC module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.ABC
@@ -9,7 +9,7 @@ mealpy.swarm\_based.ABC
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.ACOR
+mealpy.swarm\_based.ACOR module
 -------------------------------
 
 .. automodule:: mealpy.swarm_based.ACOR
@@ -17,7 +17,15 @@ mealpy.swarm\_based.ACOR
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.ALO
+mealpy.swarm\_based.AGTO module
+-------------------------------
+
+.. automodule:: mealpy.swarm_based.AGTO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.ALO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.ALO
@@ -25,7 +33,7 @@ mealpy.swarm\_based.ALO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.AO
+mealpy.swarm\_based.AO module
 -----------------------------
 
 .. automodule:: mealpy.swarm_based.AO
@@ -33,7 +41,23 @@ mealpy.swarm\_based.AO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.BA
+mealpy.swarm\_based.ARO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.ARO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.AVOA module
+-------------------------------
+
+.. automodule:: mealpy.swarm_based.AVOA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.BA module
 -----------------------------
 
 .. automodule:: mealpy.swarm_based.BA
@@ -41,7 +65,7 @@ mealpy.swarm\_based.BA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.BES
+mealpy.swarm\_based.BES module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.BES
@@ -49,7 +73,7 @@ mealpy.swarm\_based.BES
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.BFO
+mealpy.swarm\_based.BFO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.BFO
@@ -57,7 +81,7 @@ mealpy.swarm\_based.BFO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.BSA
+mealpy.swarm\_based.BSA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.BSA
@@ -65,7 +89,7 @@ mealpy.swarm\_based.BSA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.BeesA
+mealpy.swarm\_based.BeesA module
 --------------------------------
 
 .. automodule:: mealpy.swarm_based.BeesA
@@ -73,7 +97,7 @@ mealpy.swarm\_based.BeesA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.COA
+mealpy.swarm\_based.COA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.COA
@@ -81,7 +105,7 @@ mealpy.swarm\_based.COA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.CSA
+mealpy.swarm\_based.CSA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.CSA
@@ -89,7 +113,7 @@ mealpy.swarm\_based.CSA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.CSO
+mealpy.swarm\_based.CSO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.CSO
@@ -97,7 +121,23 @@ mealpy.swarm\_based.CSO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.DO
+mealpy.swarm\_based.CoatiOA module
+----------------------------------
+
+.. automodule:: mealpy.swarm_based.CoatiOA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.DMOA module
+-------------------------------
+
+.. automodule:: mealpy.swarm_based.DMOA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.DO module
 -----------------------------
 
 .. automodule:: mealpy.swarm_based.DO
@@ -105,7 +145,7 @@ mealpy.swarm\_based.DO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.EHO
+mealpy.swarm\_based.EHO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.EHO
@@ -113,7 +153,15 @@ mealpy.swarm\_based.EHO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.FA
+mealpy.swarm\_based.ESOA module
+-------------------------------
+
+.. automodule:: mealpy.swarm_based.ESOA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.FA module
 -----------------------------
 
 .. automodule:: mealpy.swarm_based.FA
@@ -121,7 +169,7 @@ mealpy.swarm\_based.FA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.FFA
+mealpy.swarm\_based.FFA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.FFA
@@ -129,7 +177,15 @@ mealpy.swarm\_based.FFA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.FOA
+mealpy.swarm\_based.FFO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.FFO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.FOA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.FOA
@@ -137,7 +193,23 @@ mealpy.swarm\_based.FOA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.GOA
+mealpy.swarm\_based.FOX module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.FOX
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.GJO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.GJO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.GOA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.GOA
@@ -145,7 +217,15 @@ mealpy.swarm\_based.GOA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.GWO
+mealpy.swarm\_based.GTO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.GTO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.GWO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.GWO
@@ -153,7 +233,15 @@ mealpy.swarm\_based.GWO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.HGS
+mealpy.swarm\_based.HBA module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.HBA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.HGS module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.HGS
@@ -161,7 +249,7 @@ mealpy.swarm\_based.HGS
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.HHO
+mealpy.swarm\_based.HHO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.HHO
@@ -169,7 +257,7 @@ mealpy.swarm\_based.HHO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.JA
+mealpy.swarm\_based.JA module
 -----------------------------
 
 .. automodule:: mealpy.swarm_based.JA
@@ -177,7 +265,7 @@ mealpy.swarm\_based.JA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.MFO
+mealpy.swarm\_based.MFO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.MFO
@@ -185,7 +273,23 @@ mealpy.swarm\_based.MFO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.MRFO
+mealpy.swarm\_based.MGO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.MGO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.MPA module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.MPA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.MRFO module
 -------------------------------
 
 .. automodule:: mealpy.swarm_based.MRFO
@@ -193,7 +297,7 @@ mealpy.swarm\_based.MRFO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.MSA
+mealpy.swarm\_based.MSA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.MSA
@@ -201,7 +305,15 @@ mealpy.swarm\_based.MSA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.NMRA
+mealpy.swarm\_based.NGO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.NGO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.NMRA module
 -------------------------------
 
 .. automodule:: mealpy.swarm_based.NMRA
@@ -209,7 +321,15 @@ mealpy.swarm\_based.NMRA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.PFA
+mealpy.swarm\_based.OOA module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.OOA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.PFA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.PFA
@@ -217,7 +337,15 @@ mealpy.swarm\_based.PFA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.PSO
+mealpy.swarm\_based.POA module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.POA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.PSO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.PSO
@@ -225,7 +353,15 @@ mealpy.swarm\_based.PSO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.SFO
+mealpy.swarm\_based.SCSO module
+-------------------------------
+
+.. automodule:: mealpy.swarm_based.SCSO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.SFO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.SFO
@@ -233,7 +369,7 @@ mealpy.swarm\_based.SFO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.SHO
+mealpy.swarm\_based.SHO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.SHO
@@ -241,7 +377,7 @@ mealpy.swarm\_based.SHO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.SLO
+mealpy.swarm\_based.SLO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.SLO
@@ -249,7 +385,7 @@ mealpy.swarm\_based.SLO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.SRSR
+mealpy.swarm\_based.SRSR module
 -------------------------------
 
 .. automodule:: mealpy.swarm_based.SRSR
@@ -257,7 +393,7 @@ mealpy.swarm\_based.SRSR
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.SSA
+mealpy.swarm\_based.SSA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.SSA
@@ -265,7 +401,7 @@ mealpy.swarm\_based.SSA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.SSO
+mealpy.swarm\_based.SSO module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.SSO
@@ -273,7 +409,7 @@ mealpy.swarm\_based.SSO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.SSpiderA
+mealpy.swarm\_based.SSpiderA module
 -----------------------------------
 
 .. automodule:: mealpy.swarm_based.SSpiderA
@@ -281,7 +417,7 @@ mealpy.swarm\_based.SSpiderA
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.SSpiderO
+mealpy.swarm\_based.SSpiderO module
 -----------------------------------
 
 .. automodule:: mealpy.swarm_based.SSpiderO
@@ -289,10 +425,66 @@ mealpy.swarm\_based.SSpiderO
    :undoc-members:
    :show-inheritance:
 
-mealpy.swarm\_based.WOA
+mealpy.swarm\_based.STO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.STO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.SeaHO module
+--------------------------------
+
+.. automodule:: mealpy.swarm_based.SeaHO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.ServalOA module
+-----------------------------------
+
+.. automodule:: mealpy.swarm_based.ServalOA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.TDO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.TDO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.TSO module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.TSO
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.WOA module
 ------------------------------
 
 .. automodule:: mealpy.swarm_based.WOA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.WaOA module
+-------------------------------
+
+.. automodule:: mealpy.swarm_based.WaOA
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+mealpy.swarm\_based.ZOA module
+------------------------------
+
+.. automodule:: mealpy.swarm_based.ZOA
    :members:
    :undoc-members:
    :show-inheritance:

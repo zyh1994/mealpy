@@ -5,22 +5,20 @@
 # --------------------------------------------------%
 
 import numpy as np
-from copy import deepcopy
 from mealpy.optimizer import Optimizer
 
 
 class BaseSMA(Optimizer):
     """
-    My changed version of: Slime Mould Algorithm (SMA)
+    The developed version: Slime Mould Algorithm (SMA)
 
     Notes
     ~~~~~
-    + Selected 2 unique and random solution to create new solution (not to create variable) --> remove third loop in original version
-    + Check bound and update fitness after each individual move instead of after the whole population move in the original version
-    + This version not only faster but also better than the original version
+    + Selected 2 unique and random solution to create new solution (not to create variable)
+    + Check bound and compare old position with new position to get the best one
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
-        + p_t (float): [0.01, 0.1], probability threshold (z in the paper)
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
+        + p_t (float): (0, 1.0) -> better [0.01, 0.1], probability threshold (z in the paper)
 
     Examples
     ~~~~~~~~
@@ -40,40 +38,37 @@ class BaseSMA(Optimizer):
     >>> epoch = 1000
     >>> pop_size = 50
     >>> p_t = 0.03
-    >>> model = BaseSMA(problem_dict1, epoch, pop_size, p_t)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = BaseSMA(epoch, pop_size, p_t)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
     """
 
     ID_WEI = 2
 
-    def __init__(self, problem, epoch=10000, pop_size=100, p_t=0.03, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, p_t=0.03, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 10000
             pop_size (int): number of population size, default = 100
             p_t (float): probability threshold (z in the paper), default = 0.03
         """
-        super().__init__(problem, kwargs)
+        super().__init__(**kwargs)
         self.epoch = self.validator.check_int("epoch", epoch, [1, 100000])
         self.pop_size = self.validator.check_int("pop_size", pop_size, [10, 10000])
         self.p_t = self.validator.check_float("p_t", p_t, (0, 1.0))
-
-        self.nfe_per_epoch = self.pop_size
+        self.set_parameters(["epoch", "pop_size", "p_t"])
         self.sort_flag = True
 
-    def create_solution(self, lb=None, ub=None):
+    def create_solution(self, lb=None, ub=None, pos=None):
         """
-        Args:
-            lb: list of lower bound values
-            ub: list of upper bound values
+        Overriding method in Optimizer class
 
         Returns:
             list: [position, target, weight]
         """
-        position = self.generate_position(lb, ub)
-        position = self.amend_position(position, lb, ub)
+        if pos is None:
+            pos = self.generate_position(lb, ub)
+        position = self.amend_position(pos, lb, ub)
         target = self.get_target_wrapper(position)
         weight = np.zeros(len(lb))
         return [position, target, weight]
@@ -116,12 +111,17 @@ class BaseSMA(Optimizer):
 
                 pos_1 = self.g_best[self.ID_POS] + vb * (self.pop[idx][self.ID_WEI] * self.pop[id_a][self.ID_POS] - self.pop[id_b][self.ID_POS])
                 pos_2 = vc * self.pop[idx][self.ID_POS]
-                pos_new = np.where(np.random.uniform(0, 1, self.problem.n_dims) < p, pos_1, pos_2)
-
+                condition = np.random.random(self.problem.n_dims) < p
+                pos_new = np.where(condition, pos_1, pos_2)
             # Check bound and re-calculate fitness after each individual move
             pos_new = self.amend_position(pos_new, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None, np.zeros(self.problem.n_dims)])
-        self.pop = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                target = self.get_target_wrapper(pos_new)
+                self.pop[idx] = self.get_better_solution([pos_new, target, np.zeros(self.problem.n_dims)], self.pop[idx])
+        if self.mode in self.AVAILABLE_MODES:
+            pop_new = self.update_target_wrapper_population(pop_new)
+            self.pop = self.greedy_selection_population(self.pop, pop_new)
 
 
 class OriginalSMA(BaseSMA):
@@ -132,8 +132,8 @@ class OriginalSMA(BaseSMA):
         1. https://doi.org/10.1016/j.future.2020.03.055
         2. https://www.researchgate.net/publication/340431861_Slime_mould_algorithm_A_new_method_for_stochastic_optimization
 
-    Hyper-parameters should fine tuned in approximate range to get faster convergen toward the global optimum:
-        + p_t (float): [0.01, 0.1], probability threshold (z in the paper)
+    Hyper-parameters should fine-tune in approximate range to get faster convergence toward the global optimum:
+        + p_t (float): (0, 1.0) -> better [0.01, 0.1], probability threshold (z in the paper)
 
     Examples
     ~~~~~~~~
@@ -153,8 +153,8 @@ class OriginalSMA(BaseSMA):
     >>> epoch = 1000
     >>> pop_size = 50
     >>> p_t = 0.03
-    >>> model = OriginalSMA(problem_dict1, epoch, pop_size, p_t)
-    >>> best_position, best_fitness = model.solve()
+    >>> model = OriginalSMA( epoch, pop_size, p_t)
+    >>> best_position, best_fitness = model.solve(problem_dict1)
     >>> print(f"Solution: {best_position}, Fitness: {best_fitness}")
 
     References
@@ -165,15 +165,14 @@ class OriginalSMA(BaseSMA):
 
     ID_WEI = 2
 
-    def __init__(self, problem, epoch=10000, pop_size=100, p_t=0.03, **kwargs):
+    def __init__(self, epoch=10000, pop_size=100, p_t=0.03, **kwargs):
         """
         Args:
-            problem (dict): The problem dictionary
             epoch (int): maximum number of iterations, default = 1000
             pop_size (int): number of population size, default = 100
             p_t (float): probability threshold (z in the paper), default = 0.03
         """
-        super().__init__(problem, epoch, pop_size, p_t, **kwargs)
+        super().__init__(epoch, pop_size, p_t, **kwargs)
 
     def evolve(self, epoch):
         """
@@ -202,21 +201,23 @@ class OriginalSMA(BaseSMA):
         pop_new = []
         for idx in range(0, self.pop_size):
             # Update the Position of search agent
-            current_agent = deepcopy(self.pop[idx])
+            pos, fit, weight = self.pop[idx][self.ID_POS].copy(), self.pop[idx][self.ID_TAR][self.ID_FIT], self.pop[idx][self.ID_WEI].copy()
             if np.random.uniform() < self.p_t:  # Eq.(2.7)
-                current_agent[self.ID_POS] = np.random.uniform(self.problem.lb, self.problem.ub)
+                pos = np.random.uniform(self.problem.lb, self.problem.ub)
             else:
-                p = np.tanh(np.abs(current_agent[self.ID_TAR][self.ID_FIT] - self.g_best[self.ID_TAR][self.ID_FIT]))  # Eq.(2.2)
+                p = np.tanh(np.abs(fit - self.g_best[self.ID_TAR][self.ID_FIT]))  # Eq.(2.2)
                 vb = np.random.uniform(-a, a, self.problem.n_dims)  # Eq.(2.3)
                 vc = np.random.uniform(-b, b, self.problem.n_dims)
                 for j in range(0, self.problem.n_dims):
                     # two positions randomly selected from population
                     id_a, id_b = np.random.choice(list(set(range(0, self.pop_size)) - {idx}), 2, replace=False)
                     if np.random.uniform() < p:  # Eq.(2.1)
-                        current_agent[self.ID_POS][j] = self.g_best[self.ID_POS][j] + \
-                            vb[j] * (current_agent[self.ID_WEI][j] * self.pop[id_a][self.ID_POS][j] - self.pop[id_b][self.ID_POS][j])
+                        pos[j] = self.g_best[self.ID_POS][j] + vb[j] * (weight[j] * self.pop[id_a][self.ID_POS][j] - self.pop[id_b][self.ID_POS][j])
                     else:
-                        current_agent[self.ID_POS][j] = vc[j] * current_agent[self.ID_POS][j]
-            pos_new = self.amend_position(current_agent[self.ID_POS], self.problem.lb, self.problem.ub)
+                        pos[j] = vc[j] * pos[j]
+            pos_new = self.amend_position(pos, self.problem.lb, self.problem.ub)
             pop_new.append([pos_new, None, np.zeros(self.problem.n_dims)])
-        self.pop = self.update_target_wrapper_population(pop_new)
+            if self.mode not in self.AVAILABLE_MODES:
+                self.pop[idx] = [pos_new, self.get_target_wrapper(pos_new), np.zeros(self.problem.n_dims)]
+        if self.mode in self.AVAILABLE_MODES:
+            self.pop = self.update_target_wrapper_population(pop_new)

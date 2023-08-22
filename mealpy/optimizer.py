@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 08:58, 16/03/2020 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -13,6 +13,8 @@ from mealpy.utils.termination import Termination
 from mealpy.utils.logger import Logger
 from mealpy.utils.validator import Validator
 import concurrent.futures as parallel
+from functools import partial
+import os
 import time
 
 
@@ -22,7 +24,7 @@ class Optimizer:
 
     Notes
     ~~~~~
-    + The solve() is the most important method, trained the model
+    + The function solve() is the most important method, trained the model
     + The parallel (multithreading or multiprocessing) is used in method: create_population(), update_target_wrapper_population()
     + The general format of:
         + population = [agent_1, agent_2, ..., agent_N]
@@ -43,84 +45,129 @@ class Optimizer:
 
     EPSILON = 10E-10
 
-    def __init__(self, problem, kwargs=None):
-        """
-        Args:
-            problem: an instance of Problem class or a dictionary
-
-        Examples:
-            problem = {
-                "fit_func": your objective function,
-                "lb": list of value
-                "ub": list of value
-                "minmax": "min" or "max"
-                "verbose": True or False
-                "n_dims": int (Optional)
-                "obj_weights": list weights corresponding to all objectives (Optional, default = [1, 1, ...1])
-            }
-        """
+    def __init__(self, **kwargs):
         super(Optimizer, self).__init__()
         self.epoch, self.pop_size, self.solution = None, None, None
-        self.mode, self._print_model = "sequential", ""
-        self.pop, self.g_best = None, None
-        if kwargs is None: kwargs = {}
+        self.mode, self.n_workers, self.name = None, None, None
+        self.pop, self.g_best, self.g_worst = None, None, None
+        self.problem, self.logger, self.history = None, None, None
         self.__set_keyword_arguments(kwargs)
-        self.problem = Problem(problem=problem)
-        self.amend_position = self.problem.amend_position
-        self.generate_position = self.problem.generate_position
-        self.logger = Logger(self.problem.log_to, log_file=self.problem.log_file).create_logger(name=f"{self.__module__}.{self.__class__.__name__}")
-        self.logger.info(self.problem.msg)
-        self.history = History(log_to=self.problem.log_to, log_file=self.problem.log_file)
-        self.validator = Validator(log_to=self.problem.log_to, log_file=self.problem.log_file)
-        if "name" in kwargs: self._print_model += f"Model: {kwargs['name']}, "
-        if "fit_name" in kwargs: self._print_model += f"Func: {kwargs['fit_name']}, "
-        self.termination_flag = False
-        if "termination" in kwargs:
-            self.termination = Termination(termination=kwargs["termination"], log_to=self.problem.log_to, log_file=self.problem.log_file)
-            self.termination_flag = True
-        self.nfe_per_epoch = self.pop_size
+        self.validator = Validator(log_to="console", log_file=None)
+
+        if self.name is None: self.name = self.__class__.__name__
         self.sort_flag = False
+        self.nfe_counter = -1       # The first one is tested in Problem class
+        self.parameters, self.params_name_ordered = {}, None
+        self.AVAILABLE_MODES = ["process", "thread", "swarm"]
+        self.support_parallel_modes = True
 
     def __set_keyword_arguments(self, kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
-    def termination_start(self):
-        if self.termination_flag:
-            if self.termination.mode == 'TB':
-                self.count_terminate = time.perf_counter()
-            elif self.termination.mode == 'ES':
-                self.count_terminate = 0
-            elif self.termination.mode == 'MG':
-                self.count_terminate = self.epoch
-            else:  # number of function evaluation (NFE)
-                self.count_terminate = 0 # self.pop_size  # First out of loop
-            self.logger.warning(f"Stopping condition mode: {self.termination.name}, with maximum value is: {self.termination.quantity}")
+    def set_parameters(self, parameters):
+        """
+        Set the parameters for current optimizer.
+
+        if paras is a list of parameter's name, then it will set the default value in optimizer as current parameters
+        if paras is a dict of parameter's name and value, then it will override the current parameters
+
+        Args:
+            parameters (list, dict): List or dict of parameters
+        """
+        if type(parameters) in (list, tuple):
+            self.params_name_ordered = tuple(parameters)
+            self.parameters = {}
+            for name in parameters:
+                self.parameters[name] = self.__dict__[name]
+
+        if type(parameters) is dict:
+            valid_para_names = set(self.parameters.keys())
+            new_para_names = set(parameters.keys())
+            if new_para_names.issubset(valid_para_names):
+                for key, value in parameters.items():
+                    setattr(self, key, value)
+                    self.parameters[key] = value
+            else:
+                raise ValueError(f"Invalid input parameters: {new_para_names} for {self.get_name()} optimizer. "
+                                 f"Valid parameters are: {valid_para_names}.")
+
+    def get_parameters(self):
+        """
+        Get parameters of optimizer.
+
+        Returns:
+            dict: [str, any]
+        """
+        return self.parameters
+
+    def get_attributes(self):
+        """
+        Get all attributes in optimizer.
+
+        Returns:
+            dict: [str, any]
+        """
+        return self.__dict__
+
+    def get_name(self):
+        return self.name
+
+    def __str__(self):
+        temp = ""
+        for key in self.params_name_ordered:
+            temp += f"{key}={self.parameters[key]}, "
+        temp = temp[:-2]
+        return f"{self.__class__.__name__}({temp})"
+
+    def before_initialization(self, starting_positions=None):
+        if starting_positions is None:
+            pass
+        elif type(starting_positions) in [list, np.ndarray] and len(starting_positions) == self.pop_size:
+            if isinstance(starting_positions[0], np.ndarray) and len(starting_positions[0]) == self.problem.n_dims:
+                self.pop = [self.create_solution(self.problem.lb, self.problem.ub, pos) for pos in starting_positions]
+            else:
+                raise ValueError("Starting positions should be a list of positions or 2D matrix of positions only.")
+        else:
+            raise ValueError("Starting positions should be a list/2D matrix of positions with same length as pop_size hyper-parameter.")
 
     def initialization(self):
-        self.pop = self.create_population(self.pop_size)
-        if self.sort_flag:
-            # We sort the population
-            self.pop, self.g_best = self.get_global_best_solution(self.pop)
-        else:
-            # We don't sort the population
-            _, self.g_best = self.get_global_best_solution(self.pop)
+        if self.pop is None:
+            self.pop = self.create_population(self.pop_size)
 
-    def get_target_wrapper(self, position):
+    def after_initialization(self):
+        # The initial population is sorted or not depended on algorithm's strategy
+        pop_temp, best, worst = self.get_special_solutions(self.pop, best=1, worst=1)
+        self.g_best, self.g_worst = best[0], worst[0]
+        # pop_temp, self.g_best = self.get_global_best_solution(self.pop)
+        if self.sort_flag: self.pop = pop_temp
+        ## Store initial best and worst solutions
+        self.history.store_initial_best_worst(self.g_best, self.g_worst)
+
+    def before_main_loop(self):
+        pass
+
+    def initialize_variables(self):
+        pass
+
+    def get_target_wrapper(self, position, counted=True):
         """
         Args:
             position (nd.array): position (nd.array): 1-D numpy array
+            counted (bool): indicating the number of function evaluations is increasing or not
 
         Returns:
             [fitness, [obj1, obj2,...]]
         """
+        if counted:
+            self.nfe_counter += 1
         objs = self.problem.fit_func(position)
         if not self.problem.obj_is_list:
             objs = [objs]
         fit = np.dot(objs, self.problem.obj_weights)
         return [fit, objs]
 
-    def create_solution(self, lb=None, ub=None):
+    def create_solution(self, lb=None, ub=None, pos=None):
         """
         To get the position, target wrapper [fitness and obj list]
             + A[self.ID_POS]                  --> Return: position
@@ -131,86 +178,155 @@ class Optimizer:
         Args:
             lb: list of lower bound values
             ub: list of upper bound values
+            pos (np.ndarray): the known position. If None is passed, the default function generate_position() will be used
 
         Returns:
             list: wrapper of solution with format [position, [fitness, [obj1, obj2, ...]]]
         """
-        position = self.generate_position(lb, ub)
-        position = self.amend_position(position, lb, ub)
+        if pos is None:
+            pos = self.generate_position(lb, ub)
+        position = self.amend_position(pos, lb, ub)
         target = self.get_target_wrapper(position)
         return [position, target]
-
-    def before_evolve(self, epoch):
-        pass
-
-    def after_evolve(self, epoch):
-        pass
-
-    def solve(self, mode='sequential'):
-        """
-        Args:
-            mode (str): 'sequential', 'thread', 'process'.
-
-                * 'sequential': recommended for simple and small task (< 10 seconds for calculating objective)
-                * 'thread': recommended for IO bound task, or small computing task (< 2 minutes for calculating objective)
-                * 'process': recommended for hard and big task (> 2 minutes for calculating objective)
-
-        Returns:
-            list: [position, fitness value]
-        """
-        self.mode = mode
-        self.termination_start()
-        self.initialization()
-        self.history.save_initial_best(self.g_best)
-
-        for epoch in range(0, self.epoch):
-            time_epoch = time.perf_counter()
-
-            ## Call before evolve function
-            self.before_evolve(epoch)
-
-            ## Evolve method will be called in child class
-            self.evolve(epoch)
-
-            ## Call after evolve function
-            self.after_evolve(epoch)
-
-            # update global best position
-            if self.sort_flag:
-                self.pop, self.g_best = self.update_global_best_solution(self.pop)  # We sort the population
-            else:
-                _, self.g_best = self.update_global_best_solution(self.pop)  # We don't sort the population
-            time_epoch = time.perf_counter() - time_epoch
-            self.track_optimize_step(self.pop, epoch+1, time_epoch)
-            if self.termination_flag:
-                if self.termination.mode == 'TB':
-                    if time.perf_counter() - self.count_terminate >= self.termination.quantity:
-                        self.logger.warning(f"Stopping criterion with mode {self.termination.name} occurred. End program!")
-                        break
-                elif self.termination.mode == 'FE':
-                    self.count_terminate += self.nfe_per_epoch
-                    if self.count_terminate >= self.termination.quantity:
-                        self.logger.warning(f"Stopping criterion with mode {self.termination.name} occurred. End program!")
-                        break
-                elif self.termination.mode == 'MG':
-                    if (epoch+1) >= self.termination.quantity:
-                        self.logger.warning(f"Stopping criterion with mode {self.termination.name} occurred. End program!")
-                        break
-                else:  # Early Stopping
-                    temp = self.count_terminate + self.history.get_global_repeated_times(self.ID_TAR, self.ID_FIT, self.EPSILON)
-                    if temp >= self.termination.quantity:
-                        self.logger.warning(f"Stopping criterion with mode {self.termination.name} occurred. End program!")
-                        break
-
-        self.track_optimize_process()
-        return self.solution[self.ID_POS], self.solution[self.ID_TAR][self.ID_FIT]
 
     def evolve(self, epoch):
         pass
 
+    def bounded_position(self, position=None, lb=None, ub=None):
+        """
+        This is default function in most algorithms. Otherwise, there will be an overridden function
+        in child of Optimizer class for this function.
+
+        Args:
+            position: vector position (location) of the solution.
+            lb: list of lower bound values
+            ub: list of upper bound values
+
+        Returns:
+            Bounded position (make the position is in bound)
+        """
+        return np.clip(position, lb, ub)
+
+    def amend_position(self, position=None, lb=None, ub=None):
+        """
+        This function will call two functions:
+            + self.bounded_position(): Get the valid position by the Optimizer
+            + self.problem.amend_position(): Amend the position by the problem
+
+        Args:
+            position: vector position (location) of the solution.
+            lb: list of lower bound values
+            ub: list of upper bound values
+
+        Returns:
+            Amended position (make the position is in bound)
+        """
+        pos = self.bounded_position(position, lb, ub)
+        return self.problem.amend_position(pos, lb, ub)
+
+    def check_problem(self, problem):
+        self.problem = problem if isinstance(problem, Problem) else Problem(**problem)
+        self.generate_position = self.problem.generate_position
+        self.logger = Logger(self.problem.log_to, log_file=self.problem.log_file).create_logger(name=f"{self.__module__}.{self.__class__.__name__}")
+        self.logger.info(self.problem.msg)
+        self.history = History(log_to=self.problem.log_to, log_file=self.problem.log_file)
+        self.pop, self.g_best, self.g_worst = None, None, None
+
+    def check_mode_and_workers(self, mode, n_workers):
+        self.mode = self.validator.check_str("mode", mode, ["single", "swarm", "thread", "process"])
+        if self.mode in ("process", "thread"):
+            if not self.support_parallel_modes:
+                self.logger.warning(f"{self.__class__.__name__} doesn't support parallelization. The default mode 'single' is activated.")
+                self.mode = "single"
+            elif n_workers is not None:
+                if self.mode == "process":
+                    self.n_workers = self.validator.check_int("n_workers", n_workers, [2, min(61, os.cpu_count() - 1)])
+                if self.mode == "thread":
+                    self.n_workers = self.validator.check_int("n_workers", n_workers, [2, min(32, os.cpu_count() + 4)])
+            else:
+                self.logger.warning(f"The parallel mode: {self.mode} is selected. But n_workers is not set. The default n_workers = 4 is used.")
+                self.n_workers = 4
+
+    def check_termination(self, mode="start", termination=None, epoch=None):
+        if mode == "start":
+            self.termination = termination
+            if termination is not None:
+                if isinstance(termination, Termination):
+                    self.termination = termination
+                elif type(termination) == dict:
+                    self.termination = Termination(log_to=self.problem.log_to, log_file=self.problem.log_file, **termination)
+                else:
+                    raise ValueError("Termination needs to be a dict or an instance of Termination class.")
+                self.nfe_counter = 0
+                self.termination.set_start_values(0, self.nfe_counter, time.perf_counter(), 0)
+        else:
+            finished = False
+            if self.termination is not None:
+                es = self.history.get_global_repeated_times(self.ID_TAR, self.ID_FIT, self.termination.epsilon)
+                finished = self.termination.should_terminate(epoch, self.nfe_counter, time.perf_counter(), es)
+                if finished:
+                    self.logger.warning(self.termination.message)
+            return finished
+
+    def solve(self, problem=None, mode='single', starting_positions=None, n_workers=None, termination=None):
+        """
+        Args:
+            problem (Problem, dict): an instance of Problem class or a dictionary
+
+                problem = {
+                    "fit_func": your objective function,
+                    "lb": list of value
+                    "ub": list of value
+                    "minmax": "min" or "max"
+                    "verbose": True or False
+                    "n_dims": int (Optional)
+                    "obj_weights": list weights corresponding to all objectives (Optional, default = [1, 1, ...1])
+                }
+
+            mode (str): Parallel: 'process', 'thread'; Sequential: 'swarm', 'single'.
+
+                * 'process': The parallel mode with multiple cores run the tasks
+                * 'thread': The parallel mode with multiple threads run the tasks
+                * 'swarm': The sequential mode that no effect on updating phase of other agents
+                * 'single': The sequential mode that effect on updating phase of other agents, default
+
+            starting_positions(list, np.ndarray): List or 2D matrix (numpy array) of starting positions with length equal pop_size parameter
+            n_workers (int): The number of workers (cores or threads) to do the tasks (effect only on parallel mode)
+            termination (dict, None): The termination dictionary or an instance of Termination class
+
+        Returns:
+            list: [position, fitness value]
+        """
+        self.check_problem(problem)
+        self.check_mode_and_workers(mode, n_workers)
+        self.check_termination("start", termination, None)
+        self.initialize_variables()
+
+        self.before_initialization(starting_positions)
+        self.initialization()
+        self.after_initialization()
+
+        self.before_main_loop()
+        for epoch in range(0, self.epoch):
+            time_epoch = time.perf_counter()
+
+            ## Evolve method will be called in child class
+            self.evolve(epoch)
+
+            # Update global best position, the population is sorted or not depended on algorithm's strategy
+            pop_temp, self.g_best = self.update_global_best_solution(self.pop)
+            if self.sort_flag: self.pop = pop_temp
+
+            time_epoch = time.perf_counter() - time_epoch
+            self.track_optimize_step(self.pop, epoch + 1, time_epoch)
+            if self.check_termination("end", None, epoch+1):
+                break
+        self.track_optimize_process()
+        return self.solution[self.ID_POS], self.solution[self.ID_TAR][self.ID_FIT]
+
     def track_optimize_step(self, population=None, epoch=None, runtime=None):
         """
-        Save some historical data and print out the detailed information of training process
+        Save some historical data and print out the detailed information of training process in each epoch
 
         Args:
             population (list): the current population
@@ -222,15 +338,15 @@ class Optimizer:
         if self.problem.save_population:
             self.history.list_population.append(pop)
         self.history.list_epoch_time.append(runtime)
-        self.history.list_global_best_fit.append(self.history.list_global_best[self.ID_TAR][self.ID_FIT])
-        self.history.list_current_best_fit.append(self.history.list_current_best[self.ID_TAR][self.ID_FIT])
+        self.history.list_global_best_fit.append(self.history.list_global_best[-1][self.ID_TAR][self.ID_FIT])
+        self.history.list_current_best_fit.append(self.history.list_current_best[-1][self.ID_TAR][self.ID_FIT])
         # Save the exploration and exploitation data for later usage
         pos_matrix = np.array([agent[self.ID_POS] for agent in pop])
         div = np.mean(np.abs(np.median(pos_matrix, axis=0) - pos_matrix), axis=0)
         self.history.list_diversity.append(np.mean(div, axis=0))
         ## Print epoch
-        self.logger.info(f">{self._print_model}Epoch: {epoch}, Current best: {self.history.list_current_best[-1][self.ID_TAR][self.ID_FIT]}, "
-              f"Global best: {self.history.list_global_best[-1][self.ID_TAR][self.ID_FIT]}, Runtime: {runtime:.5f} seconds")
+        self.logger.info(f">Problem: {self.problem.name}, Epoch: {epoch}, Current best: {self.history.list_current_best[-1][self.ID_TAR][self.ID_FIT]}, "
+                         f"Global best: {self.history.list_global_best[-1][self.ID_TAR][self.ID_FIT]}, Runtime: {runtime:.5f} seconds")
 
     def track_optimize_process(self):
         """
@@ -243,6 +359,8 @@ class Optimizer:
         self.history.list_global_best = self.history.list_global_best[1:]
         self.history.list_current_best = self.history.list_current_best[1:]
         self.solution = self.history.list_global_best[-1]
+        self.history.list_global_worst = self.history.list_global_worst[1:]
+        self.history.list_current_worst = self.history.list_current_worst[1:]
 
     def create_population(self, pop_size=None):
         """
@@ -256,13 +374,13 @@ class Optimizer:
             pop_size = self.pop_size
         pop = []
         if self.mode == "thread":
-            with parallel.ThreadPoolExecutor() as executor:
+            with parallel.ThreadPoolExecutor(self.n_workers) as executor:
                 list_executors = [executor.submit(self.create_solution, self.problem.lb, self.problem.ub) for _ in range(pop_size)]
                 # This method yield the result everytime a thread finished their job (not by order)
                 for f in parallel.as_completed(list_executors):
                     pop.append(f.result())
         elif self.mode == "process":
-            with parallel.ProcessPoolExecutor() as executor:
+            with parallel.ProcessPoolExecutor(self.n_workers) as executor:
                 list_executors = [executor.submit(self.create_solution, self.problem.lb, self.problem.ub) for _ in range(pop_size)]
                 # This method yield the result everytime a cpu finished their job (not by order).
                 for f in parallel.as_completed(list_executors):
@@ -283,18 +401,23 @@ class Optimizer:
         """
         pos_list = [agent[self.ID_POS] for agent in pop]
         if self.mode == "thread":
-            with parallel.ThreadPoolExecutor() as executor:
-                list_results = executor.map(self.get_target_wrapper, pos_list)  # Return result not the future object
+            with parallel.ThreadPoolExecutor(self.n_workers) as executor:
+                # Return result as original order, not the future object
+                list_results = executor.map(partial(self.get_target_wrapper, counted=False), pos_list)
                 for idx, target in enumerate(list_results):
                     pop[idx][self.ID_TAR] = target
         elif self.mode == "process":
-            with parallel.ProcessPoolExecutor() as executor:
-                list_results = executor.map(self.get_target_wrapper, pos_list)  # Return result not the future object
+            with parallel.ProcessPoolExecutor(self.n_workers) as executor:
+                # Return result as original order, not the future object
+                list_results = executor.map(partial(self.get_target_wrapper, counted=False), pos_list)
                 for idx, target in enumerate(list_results):
                     pop[idx][self.ID_TAR] = target
-        else:
+        elif self.mode == "swarm":
             for idx, pos in enumerate(pos_list):
-                pop[idx][self.ID_TAR] = self.get_target_wrapper(pos)
+                pop[idx][self.ID_TAR] = self.get_target_wrapper(pos, counted=False)
+        else:
+            return pop
+        self.nfe_counter += len(pop)
         return pop
 
     def get_global_best_solution(self, pop: list):
@@ -313,39 +436,40 @@ class Optimizer:
         else:
             return sorted_pop, deepcopy(sorted_pop[-1])
 
-    def get_better_solution(self, agent1: list, agent2: list):
+    def get_better_solution(self, agent1: list, agent2: list, reverse=False):
         """
         Args:
             agent1 (list): A solution
             agent2 (list): Another solution
+            reverse (bool): Transform this function to get_worse_solution if reverse=True, default=False
 
         Returns:
             The better solution between them
         """
         if self.problem.minmax == "min":
             if agent1[self.ID_TAR][self.ID_FIT] < agent2[self.ID_TAR][self.ID_FIT]:
-                return deepcopy(agent1)
-            return deepcopy(agent2)
+                return deepcopy(agent1) if reverse is False else deepcopy(agent2)
+            return deepcopy(agent2) if reverse is False else deepcopy(agent1)
         else:
             if agent1[self.ID_TAR][self.ID_FIT] < agent2[self.ID_TAR][self.ID_FIT]:
-                return deepcopy(agent2)
-            return deepcopy(agent1)
+                return deepcopy(agent2) if reverse is False else deepcopy(agent1)
+            return deepcopy(agent1) if reverse is False else deepcopy(agent2)
 
-    def compare_agent(self, agent_a: list, agent_b: list):
+    def compare_agent(self, agent_new: list, agent_old: list):
         """
         Args:
-            agent_a (list): Solution a
-            agent_b (list): Solution b
+            agent_new (list): The new solution
+            agent_old (list): The old solution
 
         Returns:
-            boolean: Return True if solution a better than solution b and otherwise
+            boolean: Return True if the new solution is better than the old one and otherwise
         """
         if self.problem.minmax == "min":
-            if agent_a[self.ID_TAR][self.ID_FIT] < agent_b[self.ID_TAR][self.ID_FIT]:
+            if agent_new[self.ID_TAR][self.ID_FIT] < agent_old[self.ID_TAR][self.ID_FIT]:
                 return True
             return False
         else:
-            if agent_a[self.ID_TAR][self.ID_FIT] < agent_b[self.ID_TAR][self.ID_FIT]:
+            if agent_new[self.ID_TAR][self.ID_FIT] < agent_old[self.ID_TAR][self.ID_FIT]:
                 return False
             return True
 
@@ -365,7 +489,7 @@ class Optimizer:
             pop = sorted(pop, key=lambda agent: agent[self.ID_TAR][self.ID_FIT], reverse=True)
         if best is None:
             if worst is None:
-                exit(0)
+                raise ValueError("Best and Worst can not be None in get_special_solutions function!")
             else:
                 return pop, None, deepcopy(pop[::-1][:worst])
         else:
@@ -391,7 +515,8 @@ class Optimizer:
 
     def update_global_best_solution(self, pop=None, save=True):
         """
-        Update the global best solution saved in variable named: self.history_list_g_best
+        Update global best and current best solutions in history object.
+        Also update global worst and current worst solutions in history object.
 
         Args:
             pop (list): The population of pop_size individuals
@@ -405,17 +530,36 @@ class Optimizer:
         else:
             sorted_pop = sorted(pop, key=lambda agent: agent[self.ID_TAR][self.ID_FIT], reverse=True)
         current_best = sorted_pop[0]
+        current_worst = sorted_pop[-1]
         if save:
+            ## Save current best
             self.history.list_current_best.append(current_best)
             better = self.get_better_solution(current_best, self.history.list_global_best[-1])
             self.history.list_global_best.append(better)
+            ## Save current worst
+            self.history.list_current_worst.append(current_worst)
+            worse = self.get_better_solution(current_worst, self.history.list_global_worst[-1], reverse=True)
+            self.history.list_global_worst.append(worse)
             return deepcopy(sorted_pop), deepcopy(better)
         else:
+            ## Handle current best
             local_better = self.get_better_solution(current_best, self.history.list_current_best[-1])
             self.history.list_current_best[-1] = local_better
             global_better = self.get_better_solution(current_best, self.history.list_global_best[-1])
             self.history.list_global_best[-1] = global_better
+            ## Handle current worst
+            local_worst = self.get_better_solution(current_worst, self.history.list_current_worst[-1], reverse=True)
+            self.history.list_current_worst[-1] = local_worst
+            global_worst = self.get_better_solution(current_worst, self.history.list_global_worst[-1], reverse=True)
+            self.history.list_global_worst[-1] = global_worst
             return deepcopy(sorted_pop), deepcopy(global_better)
+
+    def get_index_best(self, pop):
+        fit_list = np.array([agent[self.ID_TAR][self.ID_FIT] for agent in pop])
+        if self.problem.minmax == "min":
+            return np.argmin(fit_list)
+        else:
+            return np.argmax(fit_list)
 
     ## Selection techniques
     def get_index_roulette_wheel_selection(self, list_fitness: np.array):
@@ -428,18 +572,17 @@ class Optimizer:
         Returns:
             int: Index of selected solution
         """
-        scaled_fitness = (list_fitness - np.min(list_fitness)) / (np.ptp(list_fitness) + self.EPSILON)
+        if type(list_fitness) in [list, tuple, np.ndarray]:
+            list_fitness = np.array(list_fitness).flatten()
+        if list_fitness.ptp() == 0:
+            return int(np.random.randint(0, len(list_fitness)))
+        if np.any(list_fitness) < 0:
+            list_fitness = list_fitness - np.min(list_fitness)
+        final_fitness = list_fitness
         if self.problem.minmax == "min":
-            final_fitness = 1.0 - scaled_fitness
-        else:
-            final_fitness = scaled_fitness
-        total_sum = sum(final_fitness)
-        r = np.random.uniform(low=0, high=total_sum)
-        for idx, f in enumerate(final_fitness):
-            r = r + f
-            if r > total_sum:
-                return idx
-        return np.random.choice(range(0, len(list_fitness)))
+            final_fitness = np.max(list_fitness) - list_fitness
+        prob = final_fitness / np.sum(final_fitness)
+        return int(np.random.choice(range(0, len(list_fitness)), p=prob))
 
     def get_index_kway_tournament_selection(self, pop=None, k_way=0.2, output=2, reverse=False):
         """
@@ -464,7 +607,7 @@ class Optimizer:
             return [parent[0] for parent in list_parents[-output:]]
         return [parent[0] for parent in list_parents[:output]]
 
-    def get_levy_flight_step(self, beta=1.0, multiplier=0.001, case=0):
+    def get_levy_flight_step(self, beta=1.0, multiplier=0.001, size=None, case=0):
         """
         Get the Levy-flight step size
 
@@ -475,6 +618,7 @@ class Optimizer:
                 * 1-2: large range --> explore
 
             multiplier (float): default = 0.001
+            size (tuple, list): size of levy-flight steps, for example: (3, 2), 5, (4, )
             case (int): Should be one of these value [0, 1, -1].
 
                 * 0: return multiplier * s * np.random.uniform()
@@ -482,57 +626,24 @@ class Optimizer:
                 * -1: return multiplier * s
 
         Returns:
-            int: The step size of Levy-flight trajectory
+            float, list, np.ndarray: The step size of Levy-flight trajectory
         """
         # u and v are two random variables which follow np.random.normal distribution
         # sigma_u : standard deviation of u
         sigma_u = np.power(gamma(1 + beta) * np.sin(np.pi * beta / 2) / (gamma((1 + beta) / 2) * beta * np.power(2, (beta - 1) / 2)), 1 / beta)
         # sigma_v : standard deviation of v
         sigma_v = 1
-        u = np.random.normal(0, sigma_u ** 2)
-        v = np.random.normal(0, sigma_v ** 2)
-        s = u / np.power(abs(v), 1 / beta)
+        size = 1 if size is None else size
+        u = np.random.normal(0, sigma_u ** 2, size)
+        v = np.random.normal(0, sigma_v ** 2, size)
+        s = u / np.power(np.abs(v), 1 / beta)
         if case == 0:
             step = multiplier * s * np.random.uniform()
         elif case == 1:
             step = multiplier * s * np.random.normal(0, 1)
         else:
             step = multiplier * s
-        return step
-
-    def levy_flight(self, epoch=None, position=None, g_best_position=None, step=0.001, case=0):
-        """
-        Get the Levy-flight position of current agent
-
-        Args:
-            epoch (int): The current epoch/iteration
-            position: The position of current agent
-            g_best_position: The position of the global best solution
-            step (float): The step size in Levy-flight, default = 0.001
-            case (int): Should be one of these value [0, 1, 2]
-
-        Returns:
-            The Levy-flight position of current agent
-        """
-        beta = 1
-        # muy and v are two random variables which follow np.random.normal distribution
-        # sigma_muy : standard deviation of muy
-        sigma_muy = np.power(gamma(1 + beta) * np.sin(np.pi * beta / 2) / (gamma((1 + beta) / 2) * beta * np.power(2, (beta - 1) / 2)), 1 / beta)
-        # sigma_v : standard deviation of v
-        sigma_v = 1
-        muy = np.random.normal(0, sigma_muy ** 2)
-        v = np.random.normal(0, sigma_v ** 2)
-        s = muy / np.power(abs(v), 1 / beta)
-        levy = np.random.uniform(self.problem.lb, self.problem.ub) * step * s * (position - g_best_position)
-
-        if case == 0:
-            return levy
-        elif case == 1:
-            return position + 1.0 / np.sqrt(epoch + 1) * np.sign(np.random.random() - 0.5) * levy
-        elif case == 2:
-            return position + np.random.normal(0, 1, len(self.problem.lb)) * levy
-        elif case == 3:
-            return position + 0.01 * levy
+        return step[0] if size == 1 else step
 
     ### Survivor Selection
     def greedy_selection_population(self, pop_old=None, pop_new=None):
@@ -546,8 +657,7 @@ class Optimizer:
         """
         len_old, len_new = len(pop_old), len(pop_new)
         if len_old != len_new:
-            self.logger.error("Greedy selection of two population with different length.")
-            exit(0)
+            raise ValueError("Greedy selection of two population with different length.")
         if self.problem.minmax == "min":
             return [pop_new[i] if pop_new[i][self.ID_TAR][self.ID_FIT] < pop_old[i][self.ID_TAR][self.ID_FIT]
                     else pop_old[i] for i in range(len_old)]
@@ -560,6 +670,7 @@ class Optimizer:
         Args:
             pop (list): The population
             pop_size (int): The number of population
+            reverse (bool): False (ascending fitness order), and True (descending fitness order)
 
         Returns:
             The sorted population with pop_size size
@@ -580,6 +691,13 @@ class Optimizer:
             The opposite position
         """
         return self.problem.lb + self.problem.ub - g_best[self.ID_POS] + np.random.uniform() * (g_best[self.ID_POS] - agent[self.ID_POS])
+
+    def create_pop_group(self, pop, n_groups, m_agents):
+        pop_group = []
+        for i in range(0, n_groups):
+            group = pop[i * m_agents: (i + 1) * m_agents]
+            pop_group.append(deepcopy(group))
+        return pop_group
 
     ### Crossover
     def crossover_arithmetic(self, dad_pos=None, mom_pos=None):

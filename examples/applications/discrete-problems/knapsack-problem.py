@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python
 # Created by "Thieu" at 11:03, 29/11/2021 ----------%
 #       Email: nguyenthieu2102@gmail.com            %
 #       Github: https://github.com/thieu1995        %
@@ -7,18 +7,7 @@
 # https://developers.google.com/optimization/bin/knapsack
 
 import numpy as np
-from mealpy.bio_based import SMA, VCS, BBO, EOA, IWO, SBO, WHO
-from mealpy.physics_based import EO
-from mealpy.evolutionary_based import MA, FPA, ES, EP, DE, GA, CRO
-from mealpy.probabilistic_based import CEM
-from mealpy.music_based import HS
-from mealpy.system_based import WCA, GCO, AEO
-from mealpy.math_based import AOA, HC, SCA
-from mealpy.human_based import BRO, CA, FBIO, SARO, SSDO, TLO, GSKA, LCO, ICA, BSO, QSA, CHIO
-from mealpy.physics_based import ArchOA, ASO, EFO, HGSO, MVO, WDO, SA, TWO, NRO
-from mealpy.swarm_based import ABC, ACOR, AO, BA, WOA, SSA, SLO, SHO, SSO, NMRA, MSA, MRFO, MFO, JA
-from mealpy.swarm_based import GOA, CSA, BSA, ALO, BeesA, BES, FFA, FOA, PFA, COA, FA, SFO, SSpiderA, SSpiderO
-from mealpy.swarm_based import HHO, GWO, EHO, CSO, DO, SRSR, PSO, BFO, HGS
+from mealpy.physics_based import MVO
 
 VALUES = np.array([
     360, 83, 59, 130, 431, 67, 230, 52, 93, 125, 670, 892, 600, 38, 48, 147,
@@ -64,8 +53,8 @@ problem_dict1 = {
 }
 
 ## Run the algorithm
-model1 = MVO.OriginalMVO(problem_dict1, epoch=100, pop_size=50)
-best_position, best_fitness = model1.solve()
+model1 = MVO.OriginalMVO(epoch=100, pop_size=50)
+best_position, best_fitness = model1.solve(problem_dict1)
 print(f"Best solution: {best_position}, Best fitness: {best_fitness}")
 print(model1.solution[0].astype(int))
 

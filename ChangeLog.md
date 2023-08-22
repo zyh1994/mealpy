@@ -1,3 +1,259 @@
+
+Different versions of mealpy in terms of passing hyper-parameters. So please careful check your version before
+  using this library. (All releases can be found here: [Link](https://pypi.org/project/mealpy/#history))
+  * mealpy < 1.0.5
+  * 1.1.0 < mealpy < 1.2.2
+  * 2.0.0 <= mealpy <= 2.1.2
+  * mealpy == 2.2.0 
+  * mealpy == 2.3.0 
+  * 2.4.0 <= mealpy <= 2.4.2 (From this version, algorithms can solve discrete problem)
+  * mealpy >= 2.5.1 (Define model 1 time, solve multiple problems)
+
+
+# Version 2.5.4
+
+### Update
++ Remove deepcopy() to improve the computational speed
++ Update the parameter's order in Tuner class  
++ Update the saving's bug when using Termination in Multitask
++ Remove ILA optimizer 
++ Rename "amend_position()" definition in some algorithms to "bounded_position()".
++ Add a "amend_position()" function in Optimizer class. This function will call two functions.
+  + bounded_position() from optimizer. This means for optimizer level (get in valid range of position)
+  + amend_position() from problem. This means for problem level (transform to the correct solution)
++ Fix bugs coefficients in GWO-based optimizers.
++ Fig bug self.epoch in SCSO optimizer.
++ Fix bug self.dyn_pop_size when pop_size is small value
++ Move SHADE-based optimizers from DE to SHADE module in evolutionary_based group
++ Add Improved Grey Wolf Optimization (IGWO) in GWO algorithm
++ Add Tabu Search (TS) to math-based group
++ Add get_all_optimizers() and get_optimizer_by_name() in Mealpy
++ Rename the OriginalSA to SwarmSA in SA optimizer
++ Add the OriginalSA and GaussianSA in SA optimizer
++ Update parameters in OriginalHC and SwarmHC
++ Update ParameterGrid class to produce the dict with same order as original input
++ Add export_figures() to Tuner class. It can draw the hyperparameter tuning process. 
++ Fix several bugs in docs folders. 
+
+
+# Version 2.5.3
+
+### Update 
++ Fix bug in roulette-wheel-selection in Optimizer
++ Update multitask with input modes and terminations
++ Update Tuner with more input parameters
++ Add Lévy flight, and the selective opposition version of the artificial rabbit algorithm (LARO)
++ Add Modified Gorilla Troops Optimization (MGTO)
++ Update Giant Trevally Optimizer as requested by the authors
+  + Matlab101GTO: This version was used to produce the results presented in the paper.
+  + Matlab102GTO: This is a new version provided by the authors (Matlab link), which has been updated recently to 
+    reduce computation time.
+  + OriginalGTO: This version is implemented exactly as described in the paper.
+
+
+
+
+
+# Version 2.5.2
+
+### Update
+
++ Fixed bug all fitness values are equals in function "get index roulette wheel selection" in Optimizer class
++ Rename AdaptiveAEO by AugmentedAEO (Add reference)
++ Update text of Dwarf Mongoose Optimization Algorithm belongs to Swarm-based group
++ Fixed all tests and update all documents
++ Update Termination class, you can now design multiple Stopping Conditions for Optimizer
+
++ Bio-based group:
+  + Add Brown-Bear Optimization Algorithm (BBOA)
+    + Ref: A Novel Brown-bear Optimization Algorithm for Solving Economic Dispatch Problem 
+
++ Human-based group:
+  + Add Heap-based optimizer (HBO)
+    + Ref: Heap-based optimizer inspired by corporate rank hierarchy for global optimization 
+  + Add War Strategy Optimization (WarSO)
+    + Ref: War Strategy Optimization Algorithm: A New Effective Metaheuristic Algorithm for Global Optimization
+  + Add Human Conception Optimizer (HCO)
+    + Ref: A novel Human Conception Optimizer for solving optimization problems
+
++ Math-based group:
+  + Add Q-Learning Embedded Sine Cosine Algorithm (QLESCA)
+    + Ref: Q-learning embedded sine cosine algorithm (QLESCA)
+  + Add Success History Intelligent Optimizer (SHIO)
+    + Ref: Success history intelligent optimizer
+
++ Physics-based group:
+  + Add rime-ice (RIME)
+    + Ref: RIME: A physics-based optimization
+  + Add Energy Valley Optimizer (EVO)
+    + Ref: Energy valley optimizer: a novel metaheuristic algorithm
+  + Add Chernobyl Disaster Optimizer (CDO)
+    + Ref: Chernobyl disaster optimizer (CDO): a novel meta-heuristic method for global optimization
+  + Add Fick's Law Algorithm (FLA)
+    + Ref: Not accepted yet
+
++ Evolutionary-based group:
+  + Add CMA-ES and Simple-CMA-ES 
+    + Ref: Completely derandomized self-adaptation in evolution strategies.
+
++ Swarm-based group:
+  + Add Wavelet Mutation and Quadratic Interpolation MRFO (WMQIMRFO)
+    + Ref: An enhanced manta ray foraging optimization algorithm for shape optimization of complex CCG-Ball curves
+  + Add Egret Swarm Optimization Algorithm (ESOA)
+    + Ref: Egret Swarm Optimization Algorithm: An Evolutionary Computation Approach for Model Free Optimization
+  + Add Sea-Horse Optimization (SeaHO)
+    + Ref: Sea-horse optimizer: A nature-inspired meta-heuristic for global optimization and engineering application
+  + Add Mountain Gazelle Optimizer (MGO)
+    + Ref: Mountain Gazelle Optimizer: A new Nature-inspired Metaheuristic Algorithm for Global Optimization Problems
+  + Add Golden jackal optimization (GJO)
+    + Ref: Golden jackal optimization: A novel nature-inspired optimizer for engineering applications
+  + Add Fox Optimizer (FOX)
+    + Ref: FOX: a FOX-inspired optimization algorithm
+  + Add Giant Trevally Optimizer (GTO)
+    + Ref: Giant Trevally Optimizer (GTO): A Novel Metaheuristic Algorithm for Global Optimization and Challenging Engineering Problems
+    
++ **Warning**: Please check the original paper before you want to use these algorithms.
+  + Add Zebra Optimization Algorithm (ZOA)
+    + Ref: Zebra Optimization Algorithm: A New Bio-Inspired Optimization Algorithm for Solving Optimization Algorithm
+  + Add Osprey Optimization Algorithm (OOA)
+    + Ref: Osprey optimization algorithm: A new bio-inspired metaheuristic algorithm for solving engineering optimization problems
+  + Add Coati Optimization Algorithm (CoatiOA)
+    + Ref: Coati Optimization Algorithm: A New Bio-Inspired Metaheuristic Algorithm for Solving Optimization Problems
+  + Add Pelican Optimization Algorithm (POA)
+    + Ref: Pelican optimization algorithm: A novel nature-inspired algorithm for engineering applications
+  + Add Northern Goshawk Optimization (NGO)
+    + Ref: Northern Goshawk Optimization: A New Swarm-Based Algorithm for Solving Optimization Problems
+  + Add Serval Optimization Algorithm (ServalOA) 
+    + Ref: Serval Optimization Algorithm: A New Bio-Inspired Approach for Solving Optimization Problems
+  + Add Siberian Tiger Optimization (STO)
+    + Ref: Siberian Tiger Optimization: A New Bio-Inspired Metaheuristic Algorithm for Solving Engineering Optimization Problems
+  + Add Walrus Optimization Algorithm (WaOA)
+    + Ref: Walrus Optimization Algorithm: A New Bio-Inspired Metaheuristic Algorithm
+  + Add Tasmanian Devil Optimization (TDO)
+    + Ref: Tasmanian devil optimization: a new bio-inspired optimization algorithm for solving optimization algorithm
+  + Add Fennec Fox Optimization (FFO)
+    + Ref: Fennec Fox Optimization: A New Nature-Inspired Optimization Algorithm
+  + Add Teamwork Optimization Algorithm (TOA)
+    + Ref: Teamwork Optimization Algorithm: A New Optimization Approach for Function Minimization/Maximization
+
+
+
+
+---------------------------------------------------------------------
+
+
+# Version 2.5.1
+
+### Update
+
++ Add validator when variable can be both int/float value
++ Add algorithms to evolutionary-based group:
+  + EliteSingleGA and EliteMultiGA class
++ Add algorithms to math-based group:
+  + weIghted meaN oF vectOrs (INFO) algorithm 
+  + RUNge Kutta optimizer (RUN) 
+  + Circle Search Algorithm (CSA) 
++ Add algorithms to bio-based group:
+  + Barnacles Mating Optimizer (BMO) 
+  + Symbiotic Organisms Search (SOS) 
+  + Seagull Optimization Algorithm (SOA) 
+  + Tunicate Swarm Optimization (TSA) 
++ Add algorithms to swarm-based group:
+  + Hybrid Grey Wolf - Whale Optimization Algorithm (GWO_WOA)
+  + Marine Predators Algorithm (MPO) 
+  + Honey Badger Algorithm (HBA) 
+  + Sand Cat Swarm Optimization (SCSO) 
+  + Tuna Swarm Optimization (TSO)
+  + African Vultures Optimization Algorithm (AVOA) 
+  + Artificial Rabbits Optimization (ARO) 
+  + Artificial Gorilla Troops Optimization (AGTO) 
+  + Dwarf Mongoose Optimization Algorithm (DMOA) (weak algorithm)
+  
++ Add algorithms to human-based group:
+  + Student Psychology Based Optimization (SPBO) (weak algorithm)
+
++ Fix problem with 1 dimension
++ Enhanced the get index roulette wheel selection in Optimizer class
+
++ Update check parallel mode in Optimizer
++ Update algorithms that don't support parallel modes
++ Update the shebang #! with python codes
++ Update examples
+
+---------------------------------------------------------------------
+
+
+# Version 2.5.0
+
+### Update
+
++ Add save and load model functionalities in mealpy.utils.io module.
++ Add object that hold global/current worst solution in history object
++ Add method create_pop_group() in Optimizer class 
++ Add method before_initialization() in Optimizer class
++ Refactor initialization() and after_initialization() in Optimizer class
++ Remove before_evolve(), after_evolve(), and levy_flight() in Optimizer class
++ Convert termination_start() and termination_end() to check_termination() in Optimizer class
++ Remove boundary.py in utils
++ Add set_parameters() and get_parameters() in all optimizers
++ **Update new Problem class, move problem parameter from Optimizer to solve() function.**
++ Fix bug printing same entry multiple times in logger.
++ Fix bug exit() in Optimizer and utils package.
++ **Update new Termination class, move termination parameter from Optimizer to solve() function.**
++ **Add Multitask class that can run multiple optimizers on multiple problems with multiple trials.**
++ Refactor all optimizers.
++ **Add Tuner class that can help tuning hyper-parameters of optimizer.**
++ Add examples how to build new optimizer.
++ Add examples for Multitask and Tuner class.
++ Update documents, examples, tests
+
+
+---------------------------------------------------------------------
+
+# Version 2.4.2
+
+### Update
+
++ Add n_workers variable to solve() function in Optimizer class
+  + n_workers only effect by parallel mode such as "process" and "thread"
+  + n_workers default value is None and based on concurrent.futures module
++ Add 1 more Optional input parameter to the fitness function
++ Fix bug trajectory chart
++ Update fitness and objective chart
++ Remove supporting Python < 3.7, Mealpy only supports Python >=3.7
++ Group probabilistic is merged into math-based group
++ Update documents, examples, tests
+
+
+---------------------------------------------------------------------
+
+# Version 2.4.1
+
+### Update
+
++ Add after_initialization(), termination_end() to Optimizer class 
++ Update create_solution(), initialization() in Optimizer class
++ Add "starting_positions" parameter to solve() function in Optimizer class
++ Fix missing amend_position function in GA
++ Fix bug fitness value in history object
++ Update 4 training modes in all algorithms
+```code 
+Type: Parallel (no effect on updating process of agents) has 2 training modes:
+
+1. Process: Using multi-cores to update fitness for whole population
+2. Thread: Using multi-threads to update fitness for whole population
+
+Type: Sequential has 2 training modes
+
+3. Swarm (no effect on updating process): Updating fitness after the whole population move
+4. Single (effect on updating process): Updating fitness after each agent move
+```
++ Add agent's history and starting positions to docs.
+
+
+---------------------------------------------------------------------
+
+
 # Version 2.4.0
 
 ### Update
@@ -55,7 +311,7 @@
     * After the training process, everything can be accessed via the objective "history" (model.history)
 
 * You can name your model and name your fitness function when creating a model 
-  * model(problem, epoch, pop_size, ...., name='your model name', fit_name='your fitness function name')
+  * model(epoch, pop_size, ...., name='your model name', fit_name='your fitness function name')
 * Add new algorithms: 
   * Gradient-Based Optimizer (GBO) in math_based group
   * Chaos Game Optimization (CGO) in math_based group
@@ -357,7 +613,7 @@
 
 + Update GWO and its variants (GWO > RW_GWO)
     + Added Random Walk Grey Wolf Optimization - RW_GWO
-    + BaseGWO always perform better than RW_GWO
+    + OriginalGWO always perform better than RW_GWO
     
     
 + Update root.py
@@ -407,46 +663,37 @@
         + My version not only faster but also better
         
 + Added Spotted Hyena Optimizer (SHO) to swarm_based group:
-    + BaseSHO: my modified version
+    + OriginalSHO: my modified version
 
        
-+ Add category for fake algorithms (papers) and proofs: 
++ Add category for questionable algorithm or papers (called fake): 
     + Butterfly Optimization Algorithm (BOA) to swarm_based group:
-        + OriginalBOA: this is fake algorithm 
+        + OriginalBOA: this algorithm is made up one 
         + AdaptiveBOA:
         + BaseBOA:
-            + Look at this guy (the author of this algorithm):
+            + Look at the author of this algorithm
             + https://scholar.google.co.in/citations?hl=en&user=KvcHovcAAAAJ&view_op=list_works&sortby=pubdate
-            + He invent BOA algorithm and public it in 2019, but so many variant version of BOA has been created since 2015.
-            + How the hell that happened?
-            + This is a plagiarism? I think this is one of the most biggest reason why mathematician researchers
-             calling out meta-heuristics community is completely bullshit and unethical.
-            + Just for producing more trash paper without any knowledge in it? This is why I listed BOA as the totally
-             trash and fake
+            + It is interesting to note that there have been many variant versions of BOA created since 2015, even though the inventor of BOA only published it in 2019. This raises some questions about the origins of these variant algorithms and how they came to be.
              
     + Sandpiper Optimization Algorithm (SOA) to swarm_based group:
-        + OriginalSOA: the original version is fake
-            + This algorithm is trash, unethical when summit a paper to 2 journals.
-            + Can't even update its position.
+        + OriginalSOA: the original version is made up one
+            + This algorithm suffers from local optimal and lower convergence rate. 
+            + It cannot update the position, so how to converge without update position?
+            + I am curious about the algorithm's publication history, as I have found it submitted to multiple journals.
             + A detailed explain in this comment section 
             (https://www.researchgate.net/publication/334897831_Sandpiper_optimization_algorithm_a_novel_approach_for_solving_real-life_engineering_problems/comments)
         + BaseSOA: my modified version which changed some equations and flow.
         
     + Sooty Tern Optimization Algorithm (STOA) is another name of Sandpiper Optimization Algorithm (SOA) 
-        + Amandeep Kaur, Sushma Jain, Shivani Goel,  Gaurav Dhiman. What they are doing are plagiarism, uneducated
-         and unethical to meta-heuristics community.
+        + If you read the paper, you will see the similarity between these two 
     
     + Blue Monkey Optimization (BMO) to swarm_based group:
-        + OriginalBMO: the original version is fake 
-            + The idea look like "Chicken Swarm Optimization"
-            + The pseudo-code totally bullshit in my opinion, just read the paper you will understand.
-            + The unclear point here is the "Rate equation": really confuse because It's contain the position. As you know,
-                The position is the vector, but finally, the author conclude that Rate is random number in range [0, 1]
-                Luckily, using number we can plus/add number and vector or vector and vector.
-                So at first, Rate is random number then after the 1st loop, its become vector. 
-            + Morever, both equtions movement of blue monkey and children is the same.
-            + In addition, they don't check the bound after update position.
-            + Keep going, they don't tell you the how to find the global best (I mean from blue monkey group or child group)
+        + OriginalBMO: 
+            + It is a made-up algorithm with a similar idea to "Chicken Swarm Optimization," which raises questions about its originality.
+            + The pseudo-code is confusing, particularly the "Rate equation," which starts as a random number and then becomes a vector after the first loop. 
+            + The movement of the blue monkey and children is the same equations???
+            + The algorithm does not check the bound after updating the position, which can cause issues with the search space.
+            + The algorithm does not provide guidance on how to find the global best from the blue monkey group or child group.
         + BaseBMO: my modified version which used my knowledge about meta-heuristics to do it. 
 
 
@@ -497,7 +744,7 @@
     
 + For bio_based:
     + BaseIWO (IWO):
-    + BaseWHO (WHO):
+    + OriginalWHO (WHO):
     + BaseBBO (BBO):
         + Remove all third loop, make algorithm n-times faster than original 
         + In the migration step, instead of select solution based on the wheel in every variable in position, 
@@ -514,16 +761,16 @@
         + Using k-way tournament selection to select parent instead of randomizing
         + Repeat cross-over population_size / 2 instead of n_var/2
         + Mutation 50% of position instead of swap only 2 variable in a single position
-        + OriginalBWO: is fake and just a variant of Genetic Algorithm
+        + OriginalBWO: is made up algorithm and just a variant of Genetic Algorithm
     + BaseAAA (AAA): This is my changed version but still not working
-        + OriginalAAA: is fake taken from DE and CRO 
+        + OriginalAAA: is made up algorithm taken from DE and CRO 
         + I realize in the original paper, parameters, and equations not clear.
         + In the Adaptation phase, what is the point of saving starving value when it doesn't affect the solution at all?
         + The size of the solution always = 2/3, so the friction surface will always stay at the same value.
         + The idea of the equation seems like taken from DE, the adaptation and reproduction process seem like taken from CRO.
         + Appearance from 2015, but still now 2020 none of Matlab code or python code about this algorithm.
     + EOA: 
-        + BaseEOA: My modified version from original Matlab version
+        + OriginalEOA: My modified version from original Matlab version
             + The original version from Matlab code above will not work well, even with small dimensions.
             + I changed updating process
             + Changed the Cauchy process using x_mean
@@ -535,7 +782,7 @@
         + Remove all third loop
         + Apply batch-size idea
     + BSO:
-        + BaseBSO: This is original version
+        + OriginalBSO: This is original version
         + ImprovedBSO: My improved version with levy-flight and removal of some parameters.
     + QSA: 4 variant version now runs faster than n-times Original version
         + BaseQSA: Remove all third loop, apply the idea of the global best solution
@@ -551,7 +798,7 @@
         + LevyLCBO: Use levy-flight and is the best among 3 version
         + ImprovedLCBO: 
     + SSDO:
-        + BaseSSDO: This is the original version
+        + OriginalSSDO: This is the original version
         + LevySSDO: Apply the idea of levy-flight
     + GSKA:
         + OriginalGSKA: This is the original version, very slow for large-scale and slow convergence
@@ -563,12 +810,12 @@
 
 + For physics_based group:
     + WDO: 
-        + BaseWDO: is the original version
+        + OriginalWDO: is the original version
     + MVO:
         + OriginalMVO: is weak and slow algorithm 
         + BaseMVO: can solve large-scale optimization problems
     + TWO:
-        + BaseTWO: is the original version
+        + OriginalTWO: is the original version
         + OppoTWO: using opposition-based techniques (better than original version)
         + LevyTWO: using only levy-flight and better than OppoTWO
         + ImprovedTWO: using opposition-based and levy-flight and better than all others
@@ -576,64 +823,64 @@
         + OriginalEFO: is the original version, run fast but slow convergence
         + BaseEFO: using levy-flight for large-scale dimension
     + NRO:
-        + BaseNRO: is the original version, efficient even with large-scale due to levy-flight techniques
+        + OriginalNRO: is the original version, efficient even with large-scale due to levy-flight techniques
         but running-time will slow because third loop.
     + HGSO:
-        + BaseHGSO: is the original version
+        + OriginalHGSO: is the original version
         + OppoHGSO: uses opposition-based technique
         + LevyHGSO: uses levy-flight technique
     + ASO:
-        + BaseASO: is the original version
+        + OriginalASO: is the original version
     + EO:
-        + BaseEO: is the original version
+        + OriginalEO: is the original version
         + LevyEO: uses levy-flight technique for large-scale dimensions
 
 + For probabilistic_based group:
     + CEM:
-        + BaseCEM: is the original version
+        + OriginalCEM: is the original version
         + CEBaseSBO: is the hybrid version of Satin Bowerbird Optimizer (SBO) and CEM
         + CEBaseSSDO: is the hybrid version of Social-Sky Driving Optimization (SSDO) and CEM
         + CEBaseLCBO and CEBaseLCBONew: are the hybrid version of Life Choice Based Optimization and CEM
 
 + For evolutionary_based group: (Not good for large-scale problems)
     + EP:
-        + BaseEP: is the original version
+        + OriginalEP: is the original version
         + LevyEP: applied levy-flight 
     + ES:
-        + BaseES: is the original version
+        + OriginalES: is the original version
         + LevyES: applied levy-flight
     + MA:
-        + BaseMA: is the original version, can't remove third loop, very slow algorithm
+        + OriginalMA: is the original version, can't remove third loop, very slow algorithm
     + GA:
         + BaseGA: is the original version 
     + DE:
         + BaseDE: is the original version
     + FPA:
-        + BaseFPA: is the original version (already use levy-flight in it)
+        + OriginalFPA: is the original version (already use levy-flight in it)
     + CRO:
-        + BaseCRO: is the original version
+        + OriginalCRO: is the original version
         + OCRO: is the opposition-based version
 
 + For swarm_based group: 
     + PSO:
-        + BasePSO: is the original version
+        + OriginalPSO: is the original version
         + PPSO: Phasor particle swarm optimization: a simple and efficient variant of PSO
         + PSO_W: A modified particle swarm optimizer
         + HPSO_TVA: New self-organising  hierarchical PSO with jumping time-varying acceleration coefficients
     + ABC:
-        + BaseABC: my version and taken from Clever Algorithms
+        + OriginalABC: my version and taken from Clever Algorithms
     + FA:
-        + BaseFA: is the original version, running slow even the all third loop already removed
+        + OriginalFA: is the original version, running slow even the all third loop already removed
     + BA:
         + OriginalBA: is the original version 
         + BasicBA: is also the original version with improved parameters
-        + BaseBA: my modified version without A parameter
+        + AdaptiveBA: my modified version without A parameter
     + PIO: 
-        + This is fake algorithm, after changing almost everything, the algorithm works
+        + This is made up algorithm, after changing almost everything, the algorithm works
         + BasePIO: My base version
         + LevyPIO: My version based on levy-flight for large-scale dimensions
     + GWO:
-        + BaseGWO: is the original version
+        + OriginalGWO: is the original version
     + ALO:
         + OriginalALO: is the original version, slow and less efficient
         + BaseALO: my modified version which using matrix multiplication for faster 
@@ -641,21 +888,21 @@
         + OriginalMFO: is the original version
         + BaseMFO: my modified version which remove third loop, change equations and flow
     + EHO:
-        + BaseEHO: is the original version
+        + OriginalEHO: is the original version
         + LevyEHO: my levy-flight version of EHO
     + WOA:
-        + BaseWOA: is the original version
+        + OriginalWOA: is the original version
     + BSA:
-        + BaseBSA: is the original version
+        + OriginalBSA: is the original version
     + SRSR:
-        + BaseSRSR: is the original version
+        + OriginalSRSR: is the original version
     + GOA:
-        + BaseGOA: is the original version with some changed from me:
+        + OriginalGOA: is the original version with some changed from me:
             + I added normal() component to Eq, 2.7
             + Changed the way to calculate distance between two location
             + Used batch-size idea    
     + MSA:
-        + BaseMSA: is my modified version with some changed from original matlab code version
+        + OriginalMSA: is my modified version with some changed from original matlab code version
     + RHO:
         + OriginalRHO: is the original version, not working 
         + BaseRHO: my changed version 
@@ -672,7 +919,7 @@
             + Fourth: Batch size idea
             + Fifth: Add normal() component and change minus sign to a plus
     + NMRA:
-        + BaseNMRA: The original version
+        + OriginalNMRA: The original version
             + The Matlab code of paper's author here: https://github.com/rohitsalgotra/Naked-Mole-Rat-Algorithm
             + Matlab code and paper are very different. 
         + LevyNMRA: My levy-flight version 
@@ -681,45 +928,45 @@
             + Using levy-flight
             + Using crossover operator
     + BES:
-        + BaseBES: the original version
+        + OriginalBES: the original version
     + PFA:
-        + BasePFA: is the original version, I did redesign the equation based on distance.
+        + OriginalPFA: is the original version, I did redesign the equation based on distance.
             + The problem with using the distance is that when increasing the bound and dimensions 
             --> distance increase very fast --> new position will always over the bound
             --> we should divide the distance to a number of dimensions and the distance of the bound (upper-lower) to
             stabilize the distance 
             + The second problem is a new solution based on all other solutions --> we should also divide the new solution
             by the population size to stabilize it.
-        + OPFA: is an enhanced version of PFA based on Opposition-based Learning (better than BasePFA)
+        + OPFA: is an enhanced version of PFA based on Opposition-based Learning (better than OriginalPFA)
         + ImprovedPFA: (sometime better than OPFA)
             + using opposition-based learning
             + using levy-flight 2 times
     + SFO:
-        + BaseSFO: is the original version
+        + OriginalSFO: is the original version
         + ImprovedSFO: my improved version in which
             + Reform Energy equation,
             + No need parameter A and epxilon
             + Based on idea of Opposition-based Learning
     + SLO:
-        + BaseSLO: is the changed version from my student
+        + OriginalSLO: is the changed version from my student
         + ImprovedSLO: is the improved version 
     + SpaSA:
-        + BaseSpaSA: is my modified version, the original paper is fake, tons of unclear like parameters or equations
+        + BaseSpaSA: is my modified version, the original paper has several unclear parameters and equations
     + MRFO:
-        + BaseMRFO: is the original version
+        + OriginalMRFO: is the original version
         + LevyMRFO: is my modified version based on levy-flight
     + HHO:
-        + BaseHHO: is the original version 
+        + OriginalHHO: is the original version 
     + SSA:
         + OriginalSSA: is the original version
         + BaseSSA: my modified version 
     + CSO:
-        + BaseCSO: is the original version
+        + OriginalCSO: is the original version
     + BFO:
         + BaseBFO: is the adaptive version of BFO
         + OriginalBFO: is the original version taken from Clever Algorithms
     + SSO:
-        + BaseSSO: is the original version
+        + OriginalSSO: is the original version
     
 
 ### Change others
@@ -780,7 +1027,7 @@
 
 ### Change models
 + Fix bugs in Probabilistic-based algorithm
-    + BaseCEM
+    + OriginalCEM
     + CEBaseLCBO
     + CEBaseLCBONew: No levy
     + CEBaseSSDO
@@ -828,7 +1075,7 @@
 + models_history.csv: Update history of meta-heuristic algorithms        
 + examples: Added new examples of: 
     + BaseVCS
-    + BaseCEM
+    + OriginalCEM
 
 ---------------------------------------------------------------------
 
@@ -838,22 +1085,22 @@
 ### Change models
 + Evolutionary-based group 
     + Added Evolution Strategies (ES)
-        + BaseES
+        + OriginalES
         + LevyES: Idea ==> Top population being mutated based on strategy, Left population try to get out of their
          position based on levy-flight. 
     + Added Evolution Programming (EP)
-        + BaseEP: Different than ES by operator and bout_size
+        + OriginalEP: Different than ES by operator and bout_size
         + LevyEP: Idea ==> Top population being selected based on tournament strategy round, 50% Left population
              try to make a comeback to take the good position with levy jump.
     + Added Memetic Algorithm (MA)
-        + BaseMA
+        + OriginalMA
     
 ### Change others
 + models_history.csv: Update history of meta-heuristic algorithms        
 + examples: Added new examples of: 
-    + BaseES and LevyES
-    + BaseEP and LevyEP
-    + BaseMA
+    + OriginalES and LevyES
+    + OriginalEP and LevyEP
+    + OriginalMA
 
 ---------------------------------------------------------------------
 
@@ -863,7 +1110,7 @@
 ### Change models
 + Swarm-based group
     + Added Elephant Herding Optimization (EHO) in Swarm-based group
-        + BaseEHO
+        + OriginalEHO
         + LevyEHO: Changed the Uniform distribution the "Separating operator" by Levy-flight (50%) and Gaussian(50%) 
     + Added Pigeon-Inspired Optimization (PIO) in Swarm-based group
         + BasePIO (Changed almost everything include flow the algorithm)
@@ -877,8 +1124,8 @@
 + Human-based group
     + Added Gaining Sharing Knowledge-based Algorithm (GSKA)
     + Added Brain Storm Optimization Algorithm (BSO)
-        + BaseBSO
-        + ImprovedBSO (Remove some parameters + Changed Equations + Levy-flight + BaseBSO)
+        + OriginalBSO
+        + ImprovedBSO (Remove some parameters + Changed Equations + Levy-flight + OriginalBSO)
 
 + Evolutionary-based group 
     + Added Flower Pollination Algorithm (FPA)
@@ -890,13 +1137,13 @@
 ### Change others
 + models_history.csv: Update history of meta-heuristic algorithms        
 + examples: Added new examples of: 
-    + BaseFA 
+    + OriginalFA 
     + OriginalAAA
-    + BaseBSO and ImprovedBSO 
+    + OriginalBSO and ImprovedBSO 
     + BaseGSKA
     + BasePIO and LevyPIO
-    + BaseEHO and LevyEHO
-    + BaseFPA
+    + OriginalEHO and LevyEHO
+    + OriginalFPA
     
 
 
@@ -906,12 +1153,12 @@
 
 ### Change models
 + Added Sea Lion Optimization in Swarm-based group
-    + BaseSLO
+    + OriginalSLO
     + ImprovedSLO (Shrinking Encircling + Levy + SLO)
  
 ### Change others
 + models_history.csv: Update history of meta-heuristic algorithms        
-+ examples: Added new examples of: BaseSLO and ImprovedSLO 
++ examples: Added new examples of: OriginalSLO and ImprovedSLO 
 
 
 ---------------------------------------------------------------------
@@ -921,12 +1168,12 @@
 
 ### Change models
 + Added Coral Reefs Optimization in Evolutionary-based group
-    + BaseCRO
+    + OriginalCRO
     + OCRO (Opposition-based CRO)
  
 ### Change others
 + models_history.csv: Update history of meta-heuristic algorithms        
-+ examples: Added new examples of: BaseCRO and CRO   
++ examples: Added new examples of: OriginalCRO and CRO   
 
 
 ---------------------------------------------------------------------
@@ -1014,7 +1261,7 @@
     * SBO - Satin Bowerbird Optimizer
     * WHO - Wildebeest Herd Optimization
         + OriginalWHO: The original version
-        + BaseWHO: I changed the flow of algorithm
+        + OriginalWHO: I changed the flow of algorithm
     * BWO - Black Widow Optimization
     
 ### Change others
@@ -1045,7 +1292,7 @@
     * LCBO: Life Choice-Based Optimization
     * SSDO - Social Ski-Driver Optimization
         + OriginalSSDO: The original version
-        + BaseSSDO: The flow changed + SSDO
+        + OriginalSSDO: The flow changed + SSDO
         
 ### Change others
 + models_history.csv: Update history of meta-heuristic algorithms        
@@ -1076,7 +1323,7 @@
 + Physics_based: Added the cutting-edge physics-based meta-heuristic algorithms
     * NRO - Nuclear Reaction Optimization  
     * HGSO - Henry Gas Solubility Optimization
-        + BaseHGSO: The original version
+        + OriginalHGSO: The original version
         + OppoHGSO: Opposition-based + HGSO
         + LevyHGSO: Levy + HGSO
     * ASO - Atom Search Optimization
@@ -1095,7 +1342,7 @@
     * WDO - Wind Driven Optimization 
     * MVO - Multi-Verse Optimizer 
     * TWO - Tug of War Optimization
-        + BaseTWO: The original version
+        + OriginalTWO: The original version
         + OppoTWO / OppoTWO: Opposition-based + TWO
         + LevyTWO: Levy + TWO
         + ITWO: Levy + Opposition-based + TWO
@@ -1125,22 +1372,22 @@
         + OriginalEPO: Not working
         + BaseEPO: My version and works
     * NMRA - Nake Mole\-rat Algorithm
-        + BaseNMRA: The original 
-        + LevyNMR: Levy + BaseNMRA 
+        + OriginalNMRA: The original 
+        + LevyNMR: Levy + OriginalNMRA 
     * BES - Bald Eagle Search 
     * PFA - Pathfinder Algorithm
-        + BasePFA: The original
+        + OriginalPFA: The original
         + OPFA: Opposition-based PFA
         + LPFA: Levy-based PFA
         + IPFA: Improved PFA (Levy + Opposition + PFA)
         + DePFA: DE + PFA
         + LevyDePFA: Levy + DE + PFA
     * SFO - Sailfish Optimizer
-        + BaseSFO: The original
+        + OriginalSFO: The original
         + ImprovedSFO: Changed Equations + Opposition-based + SFO
     * HHO - Harris Hawks Optimization 
     * MRFO - Manta Ray Foraging Optimization
-        + BaseMRFO: The original
+        + OriginalMRFO: The original
         + MyMRFO: The version I changed the flow of the original one
     
     
@@ -1154,7 +1401,7 @@
 ### Change models
 + Swarm_based: Added more recently algorithm (since 2010 to 2016)
     * OriginalALO, BaseALO - Ant Lion Optimizer
-    * OriginalBA, AdaptiveBA, BaseBA - Bat Algorithm
+    * OriginalBA, AdaptiveBA, AdaptiveBA - Bat Algorithm
     * BSA - Bird Swarm Algorithm 
     * GWO - Grey Wolf Optimizer
     * MFO - Moth-flame optimization 
